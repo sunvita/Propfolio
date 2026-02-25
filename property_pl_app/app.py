@@ -311,7 +311,25 @@ def make_fy_labels(first_year: int, last_year: int) -> list[str]:
 
 # ── Sidebar: steps ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🏠 Propfolio")
+    st.markdown("""
+<div style="padding:12px 4px 4px;">
+<svg width="168" height="56" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="40" width="9"  height="6"  rx="2" fill="#B0BEC5"/>
+  <rect x="21" y="30" width="9"  height="16" rx="2" fill="#4F6FB5"/>
+  <rect x="32" y="18" width="9"  height="28" rx="2" fill="#1A237E"/>
+  <polyline points="2,46 35,6 66,46"
+    stroke="#F57F17" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <polyline points="57,6 67,6 67,16"
+    stroke="#F57F17" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="84" y="36"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+    font-size="32" font-weight="800" fill="#1A237E" letter-spacing="-1">Prop</text>
+  <text x="84" y="68"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+    font-size="32" font-weight="300" fill="#F57F17" letter-spacing="2">folio</text>
+</svg>
+</div>
+""", unsafe_allow_html=True)
     st.markdown("---")
 
     # ⓪ Getting Started (guide page) — always clickable except when already there
@@ -356,11 +374,19 @@ with st.sidebar:
 if st.session_state.step == 0:
     st.markdown(
         '<div class="main-header">'
-        '<h2>🏠 Propfolio</h2>'
-        '<p style="margin:0;opacity:0.9;font-size:15px;">Your Property Portfolio P&L, Simplified.</p>'
-        '<p style="margin:6px 0 0;opacity:0.8;font-size:13px;">'
+        '<svg width="260" height="86" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="10" y="40" width="9"  height="6"  rx="2" fill="#37474F"/>'
+        '<rect x="21" y="30" width="9"  height="16" rx="2" fill="#5C6BC0"/>'
+        '<rect x="32" y="18" width="9"  height="28" rx="2" fill="#7986CB"/>'
+        '<polyline points="2,46 35,6 66,46" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<polyline points="57,6 67,6 67,16" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<text x="84" y="36" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
+        '<text x="84" y="68" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="300" fill="#FFA726" letter-spacing="2">folio</text>'
+        '</svg>'
+        '<p style="margin:10px 0 0;opacity:0.85;font-size:15px;">Your Property Portfolio P&amp;L, Simplified.</p>'
+        '<p style="margin:6px 0 0;opacity:0.75;font-size:13px;">'
         'Upload your property PDFs — rental statements, bank records, utility bills, and invoices — '
-        'and Propfolio automatically builds a fully formatted P&L report for each property '
+        'and Propfolio automatically builds a fully formatted P&amp;L report for each property '
         'and your entire portfolio. No spreadsheets, no manual entry.</p>'
         '</div>',
         unsafe_allow_html=True
@@ -492,10 +518,22 @@ After generating, download the updated Session JSON to replace your previous one
 # STEP 1: Property Setup
 # ─────────────────────────────────────────────────────────────────────────────
 elif st.session_state.step == 1:
-    st.markdown('<div class="main-header"><h2>🏠 Property P&L Portfolio Builder</h2>'
-                '<p>Upload PDFs (rental statements, bank transactions, utility bills) '
-                '→ Get a fully formatted Excel P&L instantly.</p></div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-header">'
+        '<svg width="220" height="73" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="10" y="40" width="9"  height="6"  rx="2" fill="#37474F"/>'
+        '<rect x="21" y="30" width="9"  height="16" rx="2" fill="#5C6BC0"/>'
+        '<rect x="32" y="18" width="9"  height="28" rx="2" fill="#7986CB"/>'
+        '<polyline points="2,46 35,6 66,46" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<polyline points="57,6 67,6 67,16" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<text x="84" y="36" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
+        '<text x="84" y="68" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="300" fill="#FFA726" letter-spacing="2">folio</text>'
+        '</svg>'
+        '<p style="margin:8px 0 0;opacity:0.8;font-size:13px;">Upload PDFs (rental statements, bank transactions, utility bills) '
+        '→ Get a fully formatted Excel P&amp;L instantly.</p>'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     # ── Session loader (monthly update mode) ──────────────────────────────────
     with st.expander("📂 Load previous session for monthly update", expanded=False):
@@ -977,9 +1015,21 @@ elif st.session_state.step == 3:
                 df = pd.DataFrame(table_data, index=period_cols).T
                 df = df.fillna(0)
 
+                # Auto-size height: show ALL rows without internal truncation.
+                # Row ≈ 35px, header ≈ 38px, 16px buffer; clamp 200–800px.
+                _row_px    = 35
+                _header_px = 38
+                _editor_h  = _header_px + len(df) * _row_px + 16
+                _editor_h  = max(200, min(_editor_h, 800))
+
+                st.caption(
+                    f"📋 {len(df)} line items × {len(period_cols)} periods — "
+                    "scroll left/right to see all months, up/down for all rows"
+                )
                 edited = st.data_editor(
                     df,
                     use_container_width=True,
+                    height=_editor_h,
                     key=f"editor_{prop['tab']}",
                     num_rows="dynamic",
                 )
