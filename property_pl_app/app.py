@@ -1,5 +1,5 @@
 """
-Property P&L Portfolio Builder
+Propfolio — Property Portfolio P&L
 Streamlit app: PDF Upload → Parse → Review → Generate Excel
 """
 
@@ -253,7 +253,7 @@ def _merge_parsed_to_properties():
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Property P&L Builder",
+    page_title="Propfolio — Property Portfolio P&L",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -311,7 +311,7 @@ def make_fy_labels(first_year: int, last_year: int) -> list[str]:
 
 # ── Sidebar: steps ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🏠 Property P&L Builder")
+    st.markdown("## 🏠 Propfolio")
     st.markdown("---")
 
     # ⓪ Getting Started (guide page) — always clickable except when already there
@@ -328,6 +328,14 @@ with st.sidebar:
     for i, s in enumerate(steps, 1):
         if st.session_state.step == i:
             st.markdown(f"**▶ {s}**")
+        elif i == 1 and st.session_state.step != 1:
+            # ① Setup is always navigable (forward from guide, back from later steps)
+            saved = st.session_state.get('prop_configs')
+            icon  = '✅' if st.session_state.step > 1 else '○'
+            label = f"{icon} {s}" + (' 💾' if saved else '')
+            if st.button(label, use_container_width=True, key="sidebar_setup"):
+                st.session_state.step = 1
+                st.rerun()
         elif st.session_state.step > i:
             st.markdown(f"✅ {s}")
         else:
@@ -348,9 +356,12 @@ with st.sidebar:
 if st.session_state.step == 0:
     st.markdown(
         '<div class="main-header">'
-        '<h2>🏠 Property P&L Portfolio Builder</h2>'
-        '<p style="margin:0;opacity:0.9;">Automatically parse your property PDFs '
-        'and generate a fully formatted Excel P&L portfolio — no manual data entry.</p>'
+        '<h2>🏠 Propfolio</h2>'
+        '<p style="margin:0;opacity:0.9;font-size:15px;">Your Property Portfolio P&L, Simplified.</p>'
+        '<p style="margin:6px 0 0;opacity:0.8;font-size:13px;">'
+        'Upload your property PDFs — rental statements, bank records, utility bills, and invoices — '
+        'and Propfolio automatically builds a fully formatted P&L report for each property '
+        'and your entire portfolio. No spreadsheets, no manual entry.</p>'
         '</div>',
         unsafe_allow_html=True
     )
