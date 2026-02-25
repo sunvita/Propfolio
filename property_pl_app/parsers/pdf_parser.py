@@ -240,6 +240,7 @@ def _detect_year_month(text: str) -> tuple[int, int] | None:
         # High-priority labeled dates (rate notices, invoices)
         r'issue\s*date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'date\s+of\s+issue[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'date\s+of\s+payment[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'invoice\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'tax\s+invoice[^:]*:\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'billing\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
@@ -287,26 +288,36 @@ def _categorize_by_keywords(description: str) -> tuple[str, str]:
 
 
 def _extract_invoice_amount(text: str) -> float:
-    """Try common invoice total patterns to extract the payable amount."""
+    """Try common invoice total patterns to extract the payable amount.
+
+    Handles both AUD and $ currency prefixes.
+    Currency token: (?:AUD\s*|\$\s*)? — optional, matches either format.
+    """
+    _CUR = r'(?:AUD\s*|\$\s*)?'   # optional currency prefix: "AUD " or "$"
+
     patterns = [
-        r'total\s+amount\s+due[:\s]+\$?([\d,]+\.?\d*)',
-        r'amount\s+(?:due|payable)[:\s]+\$?([\d,]+\.?\d*)',
+        # RevenueWA BPay receipt: "Amount paid today AUD 823.10"
+        # Use *before* surcharge line to get base tax amount
+        rf'amount\s+paid\s+today\s+{_CUR}([\d,]+\.?\d*)',
+        # Generic total / due patterns ($ or AUD)
+        rf'total\s+amount\s+due[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'amount\s+(?:due|payable)[:\s]+{_CUR}([\d,]+\.?\d*)',
         # Rate notice: "Amount Due by 1 September 2023 $2,503.83"
-        r'amount\s+due\s+by[^$\n]{0,40}\$?([\d,]+\.?\d*)',
-        # Rate notice: "Full Payment Due 01/09/2023 $2,503.83" (may have no spaces)
-        r'full\s*payment\s*due[^$\n]{0,30}\$?([\d,]+\.?\d*)',
+        rf'amount\s+due\s+by[^$\n]{{0,40}}{_CUR}([\d,]+\.?\d*)',
+        # Rate notice: "Full Payment Due 01/09/2023 $2,503.83"
+        rf'full\s*payment\s*due[^$\n]{{0,30}}{_CUR}([\d,]+\.?\d*)',
         # Rate notice: "Payment Option 1 Full Payment ... $X"
-        r'payment\s+option\s*1[^$\n]{0,50}\$?([\d,]+\.?\d*)',
-        r'invoice\s+total[:\s]+\$?([\d,]+\.?\d*)',
-        r'total\s+incl(?:\.|\s+)?\s*gst[:\s]+\$?([\d,]+\.?\d*)',
-        r'total\s+inc(?:\.|\s+)?\s*gst[:\s]+\$?([\d,]+\.?\d*)',
-        r'total\s+including\s+gst[:\s]+\$?([\d,]+\.?\d*)',
-        r'balance\s+due[:\s]+\$?([\d,]+\.?\d*)',
-        r'please\s+pay[:\s]+\$?([\d,]+\.?\d*)',
-        r'payment\s+required[:\s]+\$?([\d,]+\.?\d*)',
-        r'amount\s+to\s+pay[:\s]+\$?([\d,]+\.?\d*)',
-        r'net\s+amount[:\s]+\$?([\d,]+\.?\d*)',
-        r'\btotal[:\s]+\$?([\d,]+\.?\d*)',
+        rf'payment\s+option\s*1[^$\n]{{0,50}}{_CUR}([\d,]+\.?\d*)',
+        rf'invoice\s+total[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'total\s+incl(?:\.|\s+)?\s*gst[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'total\s+inc(?:\.|\s+)?\s*gst[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'total\s+including\s+gst[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'balance\s+due[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'please\s+pay[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'payment\s+required[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'amount\s+to\s+pay[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'net\s+amount[:\s]+{_CUR}([\d,]+\.?\d*)',
+        rf'\btotal[:\s]+{_CUR}([\d,]+\.?\d*)',
     ]
     for pat in patterns:
         m = re.search(pat, text, re.IGNORECASE)
