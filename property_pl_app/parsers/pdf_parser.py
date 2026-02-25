@@ -93,8 +93,12 @@ BANK_CATEGORIES = {
 # ── Invoice type detection: keywords → P&L category ─────────────────────────
 INVOICE_CATEGORY_MAP = [
     # (keyword list, section, pl_category)
-    (['council rates', 'rates notice', 'municipal rates', 'local council',
-      'council levy', 'quarterly rates'],
+    (['council rates', 'rates notice', 'rate notice',
+      'municipal rates', 'local council', 'council levy', 'quarterly rates',
+      'local government rates', 'government rates and charges',
+      'rates and charges', 'general grv', 'grv valuation',
+      'rubbish/recycling service', 'rubbish recycling service',
+      'emergency services levy'],
      'opex', 'Council Rates'),
 
     (['land tax', 'land value tax', 'state revenue office', 'revenue nsw',
@@ -233,6 +237,14 @@ def _parse_amount(s) -> float | None:
 def _detect_year_month(text: str) -> tuple[int, int] | None:
     """Try to pull a statement month/year from text."""
     patterns = [
+        # High-priority labeled dates (rate notices, invoices)
+        r'issue\s*date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'date\s+of\s+issue[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'invoice\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'tax\s+invoice[^:]*:\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'billing\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        r'statement\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
+        # General patterns
         r'(january|february|march|april|may|june|july|august|'
         r'september|october|november|december)\s+(\d{4})',
         r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[- ](\d{2,4})',
@@ -279,6 +291,12 @@ def _extract_invoice_amount(text: str) -> float:
     patterns = [
         r'total\s+amount\s+due[:\s]+\$?([\d,]+\.?\d*)',
         r'amount\s+(?:due|payable)[:\s]+\$?([\d,]+\.?\d*)',
+        # Rate notice: "Amount Due by 1 September 2023 $2,503.83"
+        r'amount\s+due\s+by[^$\n]{0,40}\$?([\d,]+\.?\d*)',
+        # Rate notice: "Full Payment Due 01/09/2023 $2,503.83" (may have no spaces)
+        r'full\s*payment\s*due[^$\n]{0,30}\$?([\d,]+\.?\d*)',
+        # Rate notice: "Payment Option 1 Full Payment ... $X"
+        r'payment\s+option\s*1[^$\n]{0,50}\$?([\d,]+\.?\d*)',
         r'invoice\s+total[:\s]+\$?([\d,]+\.?\d*)',
         r'total\s+incl(?:\.|\s+)?\s*gst[:\s]+\$?([\d,]+\.?\d*)',
         r'total\s+inc(?:\.|\s+)?\s*gst[:\s]+\$?([\d,]+\.?\d*)',
@@ -559,9 +577,11 @@ def parse_pdf(file_bytes: bytes, filename: str = '', doc_type: str = 'auto') -> 
         return parse_rental_statement(file_bytes, filename)
 
     # ── 2. Government notices & rates ────────────────────────────────────────
-    if any(k in text for k in ['council rates', 'rates notice', 'municipal rates',
-                                'land tax assessment', 'notice of assessment',
-                                'revenue nsw', 'state revenue']):
+    if any(k in text for k in ['council rates', 'rates notice', 'rate notice',
+                                'municipal rates', 'local government rates',
+                                'government rates and charges', 'general grv',
+                                'grv valuation', 'land tax assessment',
+                                'notice of assessment', 'revenue nsw', 'state revenue']):
         return parse_invoice(file_bytes, filename)
 
     # ── 3. Strata / body corporate ────────────────────────────────────────────
