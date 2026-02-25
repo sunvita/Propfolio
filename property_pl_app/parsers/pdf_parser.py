@@ -188,9 +188,11 @@ def _extract_address(text: str) -> str:
     # 2. Australian address regex fallback
     aus_pat = re.compile(
         r'\d+[A-Za-z]?\s+[\w\'\-]+(?:\s+[\w\'\-]+){0,3}\s+'
-        r'(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Place|Pl|Court|Ct|'
-        r'Crescent|Cres|Boulevard|Blvd|Lane|Ln|Way|Close|Cl|Circuit|Cct|'
-        r'Parade|Pde|Terrace|Tce|Highway|Hwy|Grove|Gr)\b'
+        r'(?:Street|St|Avenue|Ave|Av|Road|Rd|Drive|Dr|Place|Pl|Court|Ct|'
+        r'Crescent|Cres|Cr|Boulevard|Blvd|Lane|Ln|Lne|Way|Wy|Close|Cl|'
+        r'Circuit|Cct|Cir|Parade|Pde|Terrace|Tce|Highway|Hwy|'
+        r'Grove|Gr|Gve|Parkway|Pkwy|Park|Pk|Square|Sq|'
+        r'Freeway|Fwy|Rise|Green|Grn|Gate|Gte|Gardens|Gts|Mews|Loop)\b'
         r'(?:[,\s]+[\w\s]+?)?[,\s]+'
         r'(?:NSW|VIC|QLD|WA|SA|TAS|ACT|NT)\s+\d{4}',
         re.IGNORECASE

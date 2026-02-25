@@ -22,11 +22,19 @@ def _add_or_update(data_dict, key, value):
 def _normalize_address(s: str) -> str:
     """Lowercase, expand common abbreviations, remove punctuation noise."""
     s = s.lower().strip()
+    # Full Australian street-type abbreviation map (long-form → canonical)
     abbr = {
-        r'\bst\b': 'street', r'\bave\b': 'avenue', r'\brd\b': 'road',
-        r'\bdr\b': 'drive',  r'\bpl\b': 'place',   r'\bct\b': 'court',
-        r'\bcres\b': 'crescent', r'\blane\b': 'lane', r'\bblvd\b': 'boulevard',
-        r'\bcl\b': 'close',  r'\bcct\b': 'circuit', r'\bhwy\b': 'highway',
+        r'\bst\b':    'street',    r'\bave\b':  'avenue',   r'\bav\b':   'avenue',
+        r'\brd\b':    'road',      r'\bdr\b':   'drive',    r'\bpl\b':   'place',
+        r'\bct\b':    'court',     r'\bcres\b': 'crescent', r'\bcr\b':   'crescent',
+        r'\bln\b':    'lane',      r'\blne\b':  'lane',     r'\bblvd\b': 'boulevard',
+        r'\bcl\b':    'close',     r'\bcct\b':  'circuit',  r'\bcir\b':  'circuit',
+        r'\bhwy\b':   'highway',   r'\bpde\b':  'parade',   r'\btce\b':  'terrace',
+        r'\bgr\b':    'grove',     r'\bgve\b':  'grove',    r'\bpkwy\b': 'parkway',
+        r'\bpk\b':    'park',      r'\bsq\b':   'square',   r'\bwy\b':   'way',
+        r'\bfwy\b':   'freeway',   r'\bvw\b':   'view',     r'\bvws\b':  'views',
+        r'\brise\b':  'rise',      r'\bgrn\b':  'green',    r'\bgte\b':  'gate',
+        r'\bgts\b':   'gardens',   r'\bmws\b':  'mews',     r'\bloop\b': 'loop',
     }
     for pat, repl in abbr.items():
         s = re.sub(pat, repl, s)
@@ -281,13 +289,15 @@ st.markdown("""
 
 # ── Session state init ──────────────────────────────────────────────────────────
 for key, default in {
-    'step':             0,      # 0 = guide page (landing)
-    'properties':       [],
-    'parsed_results':   [],
-    'fy_start_month':   7,
-    'fy_labels':        ['2029-30','2028-29','2027-28','2026-27','2025-26','2024-25'],
-    'session_loaded':   False,
-    'merge_change_log': [],
+    'step':                 0,      # 0 = guide page (landing)
+    'properties':           [],
+    'parsed_results':       [],
+    'fy_start_month':       7,
+    'fy_labels':            ['2029-30','2028-29','2027-28','2026-27','2025-26','2024-25'],
+    'session_loaded':       False,
+    'merge_change_log':     [],
+    'parse_done':           False,  # Phase A→B flag for Step 2
+    'uploaded_files_meta':  [],     # Cached file bytes for Phase B
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -326,7 +336,8 @@ with st.sidebar:
     st.markdown("---")
     if st.button("🔄 Start Over", use_container_width=True):
         for k in ['step', 'properties', 'parsed_results',
-                  'session_loaded', 'merge_change_log']:
+                  'session_loaded', 'merge_change_log',
+                  'parse_done', 'uploaded_files_meta']:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -564,6 +575,9 @@ elif st.session_state.step == 1:
                                      placeholder="e.g. IP#1 — 3A Montfort St")
                 address = st.text_input(f"Address", key=f"addr_{i}",
                                         placeholder="e.g. 3A Montfort St, Quakers Hill NSW")
+                postcode = st.text_input(f"Post Code", key=f"pc_{i}",
+                                         placeholder="e.g. 2763",
+                                         help="4-digit Australian postcode — used as primary key for address matching")
             with c2:
                 purchase_price = st.number_input(f"Purchase Price ($)", key=f"pp_{i}",
                                                  min_value=0.0, value=0.0, step=1000.0,
@@ -578,6 +592,7 @@ elif st.session_state.step == 1:
                 'name':    name or tab_name,
                 'tab':     tab_name,
                 'address': address,
+                'postcode': postcode.strip(),
                 'purchase_price': purchase_price or None,
                 'current_value':  current_value  or None,
                 'mortgage':       mortgage        or None,
@@ -597,7 +612,8 @@ elif st.session_state.step == 1:
         ]
         st.session_state.purchase_info = {
             p['tab']: {
-                'address':       p['address'],
+                'address':        p['address'],
+                'postcode':       p['postcode'],
                 'purchase_price': p['purchase_price'],
                 'current_value':  p['current_value'],
                 'mortgage':       p['mortgage'],
@@ -625,142 +641,255 @@ elif st.session_state.step == 2:
             f'<b>update changed values</b> in existing months automatically.'
             f'</div>', unsafe_allow_html=True
         )
+
+    props = st.session_state.prop_configs
+    DOC_ICON = {'rental': '📋', 'bank': '🏦', 'utility': '💡', 'invoice': '🧾'}
+
+    # ── PHASE A: Upload files ─────────────────────────────────────────────────
+    if not st.session_state.get('parse_done', False):
+
+        already_parsed = st.session_state.get('parsed_results', [])
+        if already_parsed:
+            st.markdown(
+                f'<div class="info-box">📎 <b>{len(already_parsed)} file(s) already parsed.</b> '
+                f'Upload replacements or additions below — files with the <b>same name</b> will '
+                f'replace the existing result; new filenames will be appended.</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                '<div class="info-box">📎 <b>Phase 1 of 2 — Upload</b><br>'
+                'Select PDFs for each property. You can upload multiple files at once.<br>'
+                'When all files are ready, click <b>Parse All PDFs</b> to process them in one go.</div>',
+                unsafe_allow_html=True
+            )
+
+        total_files = 0
+        for prop in props:
+            tab = prop['tab']
+            st.markdown(f"#### 🏠 {prop['name']}")
+
+            st.radio(
+                "Document type detection",
+                ['auto', 'rental', 'bank', 'utility', 'invoice'],
+                horizontal=True,
+                key=f"dtype_{tab}",
+                help="'auto' detects the type automatically. Use 'invoice' for council rates, land tax, strata, insurance, trades."
+            )
+
+            uploaded = st.file_uploader(
+                f"Upload PDFs for {prop['name']}",
+                type=['pdf'],
+                accept_multiple_files=True,
+                key=f"upload_{tab}",
+            )
+            if uploaded:
+                total_files += len(uploaded)
+                st.markdown(
+                    f'<div style="background:#E8F5E9;border-left:3px solid #4CAF50;'
+                    f'padding:6px 12px;border-radius:4px;font-size:13px;">'
+                    f'📎 <b>{len(uploaded)}</b> file(s) selected</div>',
+                    unsafe_allow_html=True
+                )
+            st.markdown("---")
+
+        if total_files > 0:
+            st.markdown(
+                f'<div class="success-box">✅ <b>{total_files} file(s)</b> ready across all properties. '
+                f'Click <b>Parse All PDFs</b> to process.</div>',
+                unsafe_allow_html=True
+            )
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("← Back", use_container_width=True):
+                st.session_state.step = 1
+                st.rerun()
+        with col2:
+            if st.button("Parse All PDFs →", type="primary",
+                         use_container_width=True, disabled=(total_files == 0)):
+                # Gather all files from widget state, parse in one pass
+                all_to_parse = []
+                for prop in props:
+                    tab = prop['tab']
+                    doc_type_val = st.session_state.get(f"dtype_{tab}", 'auto')
+                    uploads = st.session_state.get(f"upload_{tab}") or []
+                    for uf in uploads:
+                        all_to_parse.append((tab, uf.name, uf.read(), doc_type_val))
+
+                newly_parsed = []
+                prog_bar = st.progress(0)
+                status_txt = st.empty()
+                total = len(all_to_parse)
+                for idx, (tab, fname, fbytes, dt) in enumerate(all_to_parse):
+                    status_txt.text(f"Parsing {fname}  ({idx + 1}/{total})…")
+                    result = parse_pdf(fbytes, filename=fname, doc_type=dt)
+                    result['_prop_tab'] = tab
+                    result['_filename'] = fname
+                    newly_parsed.append(result)
+                    prog_bar.progress((idx + 1) / total)
+
+                prog_bar.empty()
+                status_txt.empty()
+
+                # Merge: same (tab, filename) → replace; new → append
+                existing_map = {
+                    (r.get('_prop_tab'), r.get('_filename')): r
+                    for r in st.session_state.get('parsed_results', [])
+                }
+                for r in newly_parsed:
+                    existing_map[(r['_prop_tab'], r['_filename'])] = r
+                st.session_state.parsed_results = list(existing_map.values())
+                st.session_state.parse_done = True
+                st.rerun()
+
+    # ── PHASE B: Review parsed results ────────────────────────────────────────
     else:
-        st.markdown('<div class="info-box">Upload PDFs for each property. '
-                    'The system auto-detects the document type (rental statement / bank / utility). '
-                    'You can upload multiple files per property.</div>',
+        parsed_all = st.session_state.parsed_results
+        prop_map = {p['tab']: p for p in props}
+
+        st.markdown(
+            f'<div class="success-box">✅ <b>{len(parsed_all)} file(s) parsed.</b> '
+            f'Review results below, confirm address matches, then click <b>Next</b>.</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown('<div class="info-box">📋 <b>Phase 2 of 2 — Review</b><br>'
+                    'Check address validation and include/exclude each file. '
+                    'Files flagged ❌ are excluded by default — tick the checkbox to override.</div>',
                     unsafe_allow_html=True)
 
-    parsed_all = []
-    props = st.session_state.prop_configs
+        for idx, result in enumerate(parsed_all):
+            tab      = result.get('_prop_tab', '')
+            fname    = result.get('_filename', f'file_{idx}.pdf')
+            prop     = prop_map.get(tab, {})
+            doc_icon = DOC_ICON.get(result['type'], '📄')
+            yr, mo   = result.get('year'), result.get('month')
+            period_str = f"{MONTH_NAMES.get(mo, '?')} {yr}" if yr and mo else "Period: Unknown"
 
-    for prop in props:
-        tab = prop['tab']
-        st.markdown(f"#### 🏠 {prop['name']}")
+            # Build reference address (combine address + postcode for stronger match)
+            ref_addr_base = prop.get('address', '')
+            postcode_val  = prop.get('postcode', '').strip()
+            ref_addr = f"{ref_addr_base} {postcode_val}".strip() if postcode_val else ref_addr_base
 
-        doc_type = st.radio(
-            "Document type detection",
-            ['auto', 'rental', 'bank', 'utility', 'invoice'],
-            horizontal=True,
-            key=f"dtype_{tab}",
-            help="'auto' tries to detect automatically from PDF content. Use 'invoice' for council rates, land tax, strata, insurance, trades."
-        )
+            include_key = f"include_{tab}_{fname}"
 
-        uploaded = st.file_uploader(
-            f"Upload PDFs for {prop['name']}",
-            type=['pdf'],
-            accept_multiple_files=True,
-            key=f"upload_{tab}",
-        )
+            if result['type'] != 'bank':
+                ext_addr = result.get('extracted_address', '')
+                status_label, similarity, status_color = _match_address(ext_addr, ref_addr)
+                if include_key not in st.session_state:
+                    st.session_state[include_key] = (status_color != '#C62828')
+            else:
+                ext_addr, status_label, status_color = '', '', '#9E9E9E'
 
-        if uploaded:
-            for uf in uploaded:
-                with st.spinner(f"Parsing {uf.name}…"):
-                    result = parse_pdf(uf.read(), filename=uf.name, doc_type=doc_type)
-                    result['_prop_tab'] = tab
-                    parsed_all.append(result)
+            with st.expander(
+                f"{doc_icon} [{prop.get('name', tab)}]  {fname}  —  {period_str}",
+                expanded=True
+            ):
+                # ── Remove button ──────────────────────────────────────────
+                if st.button("🗑 Remove this file", key=f"remove_{tab}_{fname}_{idx}",
+                             help="Remove this file from the parsed results"):
+                    st.session_state.parsed_results = [
+                        r for r in st.session_state.parsed_results
+                        if not (r.get('_prop_tab') == tab and r.get('_filename') == fname)
+                    ]
+                    st.rerun()
 
-                # Show parse summary
-                doc_icon = {'rental':'📋','bank':'🏦','utility':'💡','invoice':'🧾'}.get(result['type'],'📄')
-                yr, mo = result.get('year'), result.get('month')
-                period_str = f"{MONTH_NAMES.get(mo,'?')} {yr}" if yr and mo else "Period: Unknown"
+                st.markdown("---")
+                # ── Parse summary ──────────────────────────────────────────
+                if result['type'] == 'rental':
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Money In",  f"${result.get('money_in', 0):,.2f}")
+                    c2.metric("Money Out", f"${result.get('money_out', 0):,.2f}")
+                    c3.metric("EFT",       f"${result.get('eft', 0):,.2f}")
+                    if result.get('rooms'):
+                        st.dataframe(
+                            pd.DataFrame(result['rooms']).T.rename(
+                                columns={'rent': 'Rent', 'mgmt': 'Mgmt Fee', 'net': 'Net'}),
+                            use_container_width=True
+                        )
 
-                # Address validation (non-bank only)
-                include_key = f"include_{tab}_{uf.name}"
+                elif result['type'] == 'bank':
+                    txns = result.get('transactions', [])
+                    if txns:
+                        df = pd.DataFrame(txns)[['date', 'description', 'amount', 'type', 'category']]
+                        st.dataframe(df, use_container_width=True, height=200)
+                        st.markdown(f"**{len(txns)} transactions** extracted")
+                    else:
+                        st.warning("No transactions extracted. The PDF format may need manual review.")
+
+                elif result['type'] == 'utility':
+                    c1, c2 = st.columns(2)
+                    c1.metric("Utility Type", result.get('utility_type', 'Unknown'))
+                    c2.metric("Amount",       f"${result.get('amount', 0):,.2f}")
+
+                elif result['type'] == 'invoice':
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Section",      result.get('section', 'opex').upper())
+                    c2.metric("P&L Category", result.get('category', 'Miscellaneous'))
+                    c3.metric("Amount",       f"${result.get('amount', 0):,.2f}")
+
+                # ── Manual period override ─────────────────────────────────
+                if not (yr and mo):
+                    st.warning("⚠️ Period not detected. Please confirm below.")
+                    col1, col2 = st.columns(2)
+                    manual_yr = col1.number_input("Year", 2020, 2035, 2025,
+                                                  key=f"yr_{tab}_{fname}")
+                    manual_mo = col2.selectbox("Month", list(MONTH_NAMES.keys()),
+                                               format_func=lambda x: MONTH_NAMES[x],
+                                               key=f"mo_{tab}_{fname}")
+                    parsed_all[idx]['year']  = manual_yr
+                    parsed_all[idx]['month'] = manual_mo
+
+                # ── Address cross-validation (non-bank) ────────────────────
                 if result['type'] != 'bank':
-                    ref_addr = prop.get('address', '')
-                    ext_addr = result.get('extracted_address', '')
-                    status_label, similarity, status_color = _match_address(ext_addr, ref_addr)
-
-                    # Set smart default for include checkbox (only on first parse)
+                    st.markdown("---")
+                    st.markdown("**📍 Address Validation**")
+                    av1, av2 = st.columns([3, 1])
+                    with av1:
+                        st.markdown(
+                            f'<div style="border-left:4px solid {status_color};'
+                            f'padding:8px 12px;border-radius:4px;background:#FAFAFA;'
+                            f'margin-bottom:4px;">'
+                            f'<span style="color:{status_color};font-weight:bold;">'
+                            f'{status_label}</span>'
+                            f'<br><span style="font-size:12px;color:#555;">'
+                            f'<b>PDF:</b> {ext_addr or "—"}</span>'
+                            f'<br><span style="font-size:12px;color:#555;">'
+                            f'<b>Configured:</b> {ref_addr or "—"}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+                    with av2:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.checkbox(
+                            "Include in P&L",
+                            key=include_key,
+                            help="Uncheck to exclude this document from the Excel output"
+                        )
+                else:
+                    # Bank statements: always include by default
                     if include_key not in st.session_state:
-                        st.session_state[include_key] = (status_color != '#C62828')
+                        st.session_state[include_key] = True
+                    st.checkbox("Include in P&L", key=include_key)
 
-                with st.expander(f"{doc_icon} {uf.name}  —  {period_str}", expanded=True):
-                    if result['type'] == 'rental':
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Money In",  f"${result.get('money_in',0):,.2f}")
-                        c2.metric("Money Out", f"${result.get('money_out',0):,.2f}")
-                        c3.metric("EFT",       f"${result.get('eft',0):,.2f}")
-                        if result.get('rooms'):
-                            st.dataframe(
-                                pd.DataFrame(result['rooms']).T.rename(
-                                    columns={'rent':'Rent','mgmt':'Mgmt Fee','net':'Net'}),
-                                use_container_width=True
-                            )
+        st.session_state.parsed_results = parsed_all
 
-                    elif result['type'] == 'bank':
-                        txns = result.get('transactions', [])
-                        if txns:
-                            df = pd.DataFrame(txns)[['date','description','amount','type','category']]
-                            st.dataframe(df, use_container_width=True, height=200)
-                            st.markdown(f"**{len(txns)} transactions** extracted")
-                        else:
-                            st.warning("No transactions extracted. The PDF format may need manual review.")
-
-                    elif result['type'] == 'utility':
-                        c1, c2 = st.columns(2)
-                        c1.metric("Utility Type", result.get('utility_type','Unknown'))
-                        c2.metric("Amount",       f"${result.get('amount',0):,.2f}")
-
-                    elif result['type'] == 'invoice':
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Section",      result.get('section', 'opex').upper())
-                        c2.metric("P&L Category", result.get('category', 'Miscellaneous'))
-                        c3.metric("Amount",       f"${result.get('amount',0):,.2f}")
-
-                    if not (yr and mo):
-                        st.warning("⚠️ Period not detected. Please confirm below.")
-                        col1, col2 = st.columns(2)
-                        manual_yr = col1.number_input("Year", 2020, 2035, 2025, key=f"yr_{tab}_{uf.name}")
-                        manual_mo = col2.selectbox("Month", list(MONTH_NAMES.keys()),
-                                                   format_func=lambda x: MONTH_NAMES[x],
-                                                   key=f"mo_{tab}_{uf.name}")
-                        result['year'], result['month'] = manual_yr, manual_mo
-
-                    # ── Address cross-validation (non-bank) ────────────────────
-                    if result['type'] != 'bank':
-                        st.markdown("---")
-                        st.markdown("**📍 Address Validation**")
-                        av1, av2 = st.columns([3, 1])
-                        with av1:
-                            st.markdown(
-                                f'<div style="border-left:4px solid {status_color};'
-                                f'padding:8px 12px;border-radius:4px;background:#FAFAFA;'
-                                f'margin-bottom:4px;">'
-                                f'<span style="color:{status_color};font-weight:bold;">'
-                                f'{status_label}</span>'
-                                f'<br><span style="font-size:12px;color:#555;">'
-                                f'<b>PDF:</b> {ext_addr or "—"}</span>'
-                                f'<br><span style="font-size:12px;color:#555;">'
-                                f'<b>Configured:</b> {ref_addr or "—"}</span>'
-                                f'</div>',
-                                unsafe_allow_html=True
-                            )
-                        with av2:
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            st.checkbox(
-                                "Include in P&L",
-                                key=include_key,
-                                help="Uncheck to exclude this document from the Excel output"
-                            )
-
-        st.markdown("---")
-
-    st.session_state.parsed_results = parsed_all
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("← Back", use_container_width=True):
-            st.session_state.step = 1
-            st.rerun()
-    with col2:
-        skip_label = "Next: Review Data →" if parsed_all else "Skip → Review (no PDFs uploaded)"
-        if st.button(skip_label, type="primary", use_container_width=True):
-            # Merge parsed results into property data
-            _merge_parsed_to_properties()
-            st.session_state.step = 3
-            st.rerun()
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            if st.button("← Back to Setup", use_container_width=True):
+                st.session_state.step = 1
+                st.rerun()
+        with col2:
+            if st.button("🔄 Add / Replace Files", use_container_width=True):
+                # Keep existing parsed results — Phase A will merge new uploads in
+                st.session_state.parse_done = False
+                st.rerun()
+        with col3:
+            next_label = "Next: Review Data →" if parsed_all else "Skip → Review"
+            if st.button(next_label, type="primary", use_container_width=True):
+                _merge_parsed_to_properties()
+                st.session_state.step = 3
+                st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
