@@ -281,13 +281,13 @@ st.markdown("""
 
 # ── Session state init ──────────────────────────────────────────────────────────
 for key, default in {
-    'step':             1,
-    'properties':       [],   # list of {name, tab, address, data}
-    'parsed_results':   [],   # raw parsed PDF results
+    'step':             0,      # 0 = guide page (landing)
+    'properties':       [],
+    'parsed_results':   [],
     'fy_start_month':   7,
     'fy_labels':        ['2029-30','2028-29','2027-28','2026-27','2025-26','2024-25'],
-    'session_loaded':   False,  # True when a JSON session was restored
-    'merge_change_log': [],     # filled by _merge_parsed_to_properties()
+    'session_loaded':   False,
+    'merge_change_log': [],
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -303,6 +303,17 @@ def make_fy_labels(first_year: int, last_year: int) -> list[str]:
 with st.sidebar:
     st.markdown("## 🏠 Property P&L Builder")
     st.markdown("---")
+
+    # ⓪ Getting Started (guide page) — always clickable except when already there
+    if st.session_state.step == 0:
+        st.markdown("**▶ ⓪ Getting Started**")
+    else:
+        if st.button("⓪ Getting Started", use_container_width=True,
+                     key="sidebar_guide"):
+            st.session_state.step = 0
+            st.rerun()
+
+    # Steps 1–4
     steps = ["① Setup", "② Upload PDFs", "③ Review & Edit", "④ Generate Excel"]
     for i, s in enumerate(steps, 1):
         if st.session_state.step == i:
@@ -311,16 +322,154 @@ with st.sidebar:
             st.markdown(f"✅ {s}")
         else:
             st.markdown(f"○ {s}")
+
     st.markdown("---")
     if st.button("🔄 Start Over", use_container_width=True):
-        for k in ['step','properties','parsed_results']:
-            del st.session_state[k]
+        for k in ['step', 'properties', 'parsed_results',
+                  'session_loaded', 'merge_change_log']:
+            if k in st.session_state:
+                del st.session_state[k]
         st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 0: Getting Started — User Guide
+# ─────────────────────────────────────────────────────────────────────────────
+if st.session_state.step == 0:
+    st.markdown(
+        '<div class="main-header">'
+        '<h2>🏠 Property P&L Portfolio Builder</h2>'
+        '<p style="margin:0;opacity:0.9;">Automatically parse your property PDFs '
+        'and generate a fully formatted Excel P&L portfolio — no manual data entry.</p>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    # ── Overview cards ────────────────────────────────────────────────────────
+    st.markdown("### What does this app do?")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            '<div style="background:#EBF3FB;border-radius:8px;padding:16px;height:120px;">'
+            '<b>📄 Upload PDFs</b><br><br>'
+            'Drop in your rental statements, bank records, utility bills, '
+            'and tax invoices — the app reads them automatically.'
+            '</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown(
+            '<div style="background:#E8F5E9;border-radius:8px;padding:16px;height:120px;">'
+            '<b>🔍 Auto-Parse & Validate</b><br><br>'
+            'Extracts amounts, dates, and P&amp;L categories. '
+            'Cross-checks addresses against your property to flag wrong files.'
+            '</div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown(
+            '<div style="background:#FFF8E1;border-radius:8px;padding:16px;height:120px;">'
+            '<b>📊 Generate Excel</b><br><br>'
+            'Outputs a color-coded, formula-linked Excel workbook '
+            'with a P&amp;L tab per property plus a portfolio summary dashboard.'
+            '</div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Two-column: step flow + supported PDFs ────────────────────────────────
+    left, right = st.columns([3, 2])
+
+    with left:
+        st.markdown("### How to use it")
+
+        st.markdown(
+            '<div class="info-box">'
+            '<b>🆕 First-time setup (4 steps)</b>'
+            '</div>', unsafe_allow_html=True)
+        st.markdown("""
+① **Setup** — Enter the number of properties, financial year range, and property details (address, purchase price, etc.).
+
+② **Upload PDFs** — Upload documents for each property. The app auto-detects the document type and validates the address. You can include or exclude any file manually.
+
+③ **Review & Edit** — Check the parsed data in editable tables. Add or correct any missing months manually.
+
+④ **Generate Excel** — Download your formatted portfolio Excel. Also download the **Session JSON** to save your work.
+""")
+
+        st.markdown(
+            '<div class="success-box">'
+            '<b>🔄 Monthly update (returning users)</b>'
+            '</div>', unsafe_allow_html=True)
+        st.markdown("""
+On the **Setup** page, open **"Load previous session"** and upload your saved JSON file.
+Then go straight to **Upload PDFs** and upload only the new month's documents.
+
+The app will automatically:
+- **Add** data for new months
+- **Update** values that have changed in existing months
+- **Keep** unchanged values as-is
+
+After generating, download the updated Session JSON to replace your previous one.
+""")
+
+    with right:
+        st.markdown("### Supported PDF types")
+        st.markdown(
+            '<div style="background:#F8F9FA;border-radius:8px;padding:16px;">'
+
+            '<p><b>📋 Rental / Ownership Statement</b><br>'
+            '<span style="color:#555;font-size:13px;">Property management disbursement reports — '
+            'extracts rental income, management fees, and EFT amount.</span></p>'
+
+            '<p><b>🏦 Bank Statement</b><br>'
+            '<span style="color:#555;font-size:13px;">Transaction history — '
+            'auto-categorises debits/credits into P&amp;L items '
+            '(mortgage, repairs, insurance, etc.).</span></p>'
+
+            '<p><b>💡 Utility Bill</b><br>'
+            '<span style="color:#555;font-size:13px;">Electricity, water, gas, or internet bills — '
+            'detects provider and maps to the correct utility line.</span></p>'
+
+            '<p><b>🧾 Tax Invoice / Notice</b><br>'
+            '<span style="color:#555;font-size:13px;">Council rates, land tax assessments, '
+            'strata levies, building insurance, and trade invoices '
+            '(plumber, electrician, painter, etc.).</span></p>'
+
+            '</div>', unsafe_allow_html=True)
+
+        st.markdown("### Address validation")
+        st.markdown(
+            '<div style="background:#F8F9FA;border-radius:8px;padding:16px;">'
+            '<p style="font-size:13px;color:#333;">'
+            'For every non-bank PDF, the app extracts the property address and '
+            'compares it to the address you entered in Setup.</p>'
+            '<p style="font-size:13px;">'
+            '✅ <b>Matched</b> — included automatically<br>'
+            '⚠️ <b>Partial</b> — included, please verify<br>'
+            '❌ <b>Mismatch</b> — excluded by default<br>'
+            '⚪ <b>Not found</b> — included, your call</p>'
+            '<p style="font-size:13px;color:#555;">'
+            'You can override any decision with the <b>Include in P&amp;L</b> checkbox.</p>'
+            '</div>', unsafe_allow_html=True)
+
+        st.markdown("### Output Excel contains")
+        st.markdown(
+            '<div style="background:#F8F9FA;border-radius:8px;padding:16px;'
+            'font-size:13px;color:#333;">'
+            '• One <b>P&amp;L tab</b> per property<br>'
+            '• Monthly columns (newest → oldest) with FY &amp; CY totals<br>'
+            '• <b>KPI table</b> (NOI, net yield, DSCR) per property<br>'
+            '• <b>Summary tab</b> with portfolio-level dashboard<br>'
+            '• Color-coded: blue = input, black = formula, yellow = FY total'
+            '</div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    if st.button("→ Start Setup", type="primary", use_container_width=True):
+        st.session_state.step = 1
+        st.rerun()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 1: Property Setup
 # ─────────────────────────────────────────────────────────────────────────────
-if st.session_state.step == 1:
+elif st.session_state.step == 1:
     st.markdown('<div class="main-header"><h2>🏠 Property P&L Portfolio Builder</h2>'
                 '<p>Upload PDFs (rental statements, bank transactions, utility bills) '
                 '→ Get a fully formatted Excel P&L instantly.</p></div>',
