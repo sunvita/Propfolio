@@ -315,22 +315,27 @@ def make_fy_labels(first_year: int, last_year: int) -> list[str]:
 # ── Sidebar: steps ─────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-<div style="padding:12px 4px 4px;">
-<svg width="168" height="56" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="10" y="40" width="9"  height="6"  rx="2" fill="#B0BEC5"/>
-  <rect x="21" y="30" width="9"  height="16" rx="2" fill="#4F6FB5"/>
-  <rect x="32" y="18" width="9"  height="28" rx="2" fill="#1A237E"/>
-  <polyline points="2,46 35,6 66,46"
-    stroke="#F57F17" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="57,6 67,6 67,16"
-    stroke="#F57F17" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <text x="84" y="36"
-    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
-    font-size="32" font-weight="800" fill="#1A237E" letter-spacing="-1">Prop</text>
-  <text x="84" y="68"
-    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
-    font-size="32" font-weight="300" fill="#F57F17" letter-spacing="2">folio</text>
-</svg>
+<div style="background:#1A237E;border-radius:14px;padding:20px 12px 18px;
+            text-align:center;margin:10px 4px 8px;">
+  <svg width="210" height="70" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- bars: white opacity steps for navy background -->
+    <rect x="10" y="40" width="9"  height="6"  rx="2" fill="rgba(255,255,255,0.25)"/>
+    <rect x="21" y="30" width="9"  height="16" rx="2" fill="rgba(255,255,255,0.55)"/>
+    <rect x="32" y="18" width="9"  height="28" rx="2" fill="rgba(255,255,255,0.88)"/>
+    <!-- roof line -->
+    <polyline points="2,46 35,6 66,46"
+      stroke="#FFA726" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- corner mark -->
+    <polyline points="57,6 67,6 67,16"
+      stroke="#FFA726" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- wordmark -->
+    <text x="84" y="36"
+      font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+      font-size="32" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>
+    <text x="84" y="68"
+      font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+      font-size="32" font-weight="300" fill="#FFA726" letter-spacing="2">folio</text>
+  </svg>
 </div>
 """, unsafe_allow_html=True)
     st.markdown("---")
@@ -377,17 +382,16 @@ with st.sidebar:
 if st.session_state.step == 0:
     st.markdown(
         '<div class="main-header">'
-        '<svg width="260" height="86" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">'
-        '<rect x="10" y="40" width="9"  height="6"  rx="2" fill="#37474F"/>'
-        '<rect x="21" y="30" width="9"  height="16" rx="2" fill="#5C6BC0"/>'
-        '<rect x="32" y="18" width="9"  height="28" rx="2" fill="#7986CB"/>'
-        '<polyline points="2,46 35,6 66,46" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
-        '<polyline points="57,6 67,6 67,16" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
-        '<text x="84" y="36" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
-        '<text x="84" y="68" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="300" fill="#FFA726" letter-spacing="2">folio</text>'
+        '<svg width="248" height="46" viewBox="0 0 248 46" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<!-- corner mark embracing P -->'
+        '<polyline points="18,6 8,6 8,16" stroke="#FFA726" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<!-- Prop -->'
+        '<text x="28" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
+        '<!-- folio -->'
+        '<text x="112" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="300" fill="#FFA726" letter-spacing="3">folio</text>'
         '</svg>'
-        '<p style="margin:10px 0 0;opacity:0.85;font-size:15px;">Your Property Portfolio P&amp;L, Simplified.</p>'
-        '<p style="margin:6px 0 0;opacity:0.75;font-size:13px;">'
+        '<p style="margin:10px 0 0;opacity:0.85;font-size:17px;">Your Property Portfolio P&amp;L, Simplified.</p>'
+        '<p style="margin:6px 0 0;opacity:0.75;font-size:15px;">'
         'Upload your property PDFs — rental statements, bank records, utility bills, and invoices — '
         'and Propfolio automatically builds a fully formatted P&amp;L report for each property '
         'and your entire portfolio. No spreadsheets, no manual entry.</p>'
@@ -402,7 +406,7 @@ if st.session_state.step == 0:
         st.markdown(
             '<div style="background:#EBF3FB;border-radius:10px;padding:20px 18px 18px;color:#1A237E;">'
             '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📄 Upload PDFs</div>'
-            '<div style="font-size:13px;line-height:1.6;color:#2C3E7A;">'
+            '<div style="font-size:15px;line-height:1.6;color:#2C3E7A;">'
             'Drop in your rental statements, bank records, utility bills, '
             'and tax invoices — the app reads them automatically.'
             '</div></div>', unsafe_allow_html=True)
@@ -410,7 +414,7 @@ if st.session_state.step == 0:
         st.markdown(
             '<div style="background:#E8F5E9;border-radius:10px;padding:20px 18px 18px;color:#1B5E20;">'
             '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">🔍 Auto-Parse & Validate</div>'
-            '<div style="font-size:13px;line-height:1.6;color:#2E5E35;">'
+            '<div style="font-size:15px;line-height:1.6;color:#2E5E35;">'
             'Extracts amounts, dates, and P&amp;L categories. '
             'Cross-checks addresses against your property to flag wrong files.'
             '</div></div>', unsafe_allow_html=True)
@@ -418,7 +422,7 @@ if st.session_state.step == 0:
         st.markdown(
             '<div style="background:#FFF8E1;border-radius:10px;padding:20px 18px 18px;color:#5D4037;">'
             '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📊 Generate Excel</div>'
-            '<div style="font-size:13px;line-height:1.6;color:#6D4C41;">'
+            '<div style="font-size:15px;line-height:1.6;color:#6D4C41;">'
             'Outputs a color-coded, formula-linked Excel workbook '
             'with a P&amp;L tab per property plus a portfolio summary dashboard.'
             '</div></div>', unsafe_allow_html=True)
@@ -526,14 +530,10 @@ After generating, download the updated Session JSON to replace your previous one
 elif st.session_state.step == 1:
     st.markdown(
         '<div class="main-header">'
-        '<svg width="220" height="73" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">'
-        '<rect x="10" y="40" width="9"  height="6"  rx="2" fill="#37474F"/>'
-        '<rect x="21" y="30" width="9"  height="16" rx="2" fill="#5C6BC0"/>'
-        '<rect x="32" y="18" width="9"  height="28" rx="2" fill="#7986CB"/>'
-        '<polyline points="2,46 35,6 66,46" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
-        '<polyline points="57,6 67,6 67,16" stroke="#FFA726" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
-        '<text x="84" y="36" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
-        '<text x="84" y="68" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="32" font-weight="300" fill="#FFA726" letter-spacing="2">folio</text>'
+        '<svg width="248" height="46" viewBox="0 0 248 46" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="18,6 8,6 8,16" stroke="#FFA726" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        '<text x="28" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="800" fill="#FFFFFF" letter-spacing="-1">Prop</text>'
+        '<text x="112" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="300" fill="#FFA726" letter-spacing="3">folio</text>'
         '</svg>'
         '<p style="margin:8px 0 0;opacity:0.8;font-size:13px;">Upload PDFs (rental statements, bank transactions, utility bills) '
         '→ Get a fully formatted Excel P&amp;L instantly.</p>'
