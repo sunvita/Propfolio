@@ -290,7 +290,7 @@ st.markdown("""
 
     /* ── Top alignment: sidebar logo ↔ main header ── */
     [data-testid="stMainBlockContainer"] {
-        padding-top: 4.4rem !important;
+        padding-top: 4.3rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
