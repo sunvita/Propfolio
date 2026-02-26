@@ -287,6 +287,14 @@ st.markdown("""
         color: #5D4037 !important;
     }
     div[data-testid="stExpander"] { border: 1px solid #DEE2E6; border-radius: 6px; }
+
+    /* ── Top alignment: sidebar logo ↔ main header ── */
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 1.5rem !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 0.6rem !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
