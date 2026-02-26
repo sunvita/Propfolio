@@ -262,7 +262,7 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-header {
-        background: linear-gradient(135deg, #1F3864 0%, #2F5496 100%);
+        background: #1A237E;
         color: white; padding: 20px 24px; border-radius: 8px;
         margin-bottom: 24px;
     }
@@ -317,7 +317,7 @@ with st.sidebar:
     st.markdown("""
 <div style="background:#1A237E;border-radius:14px;padding:20px 12px 18px;
             text-align:center;margin:10px 4px 8px;">
-  <svg width="210" height="70" viewBox="0 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width="210" height="70" viewBox="-25 0 220 74" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">
     <!-- bars: white opacity steps for navy background -->
     <rect x="10" y="40" width="9"  height="6"  rx="2" fill="rgba(255,255,255,0.25)"/>
     <rect x="21" y="30" width="9"  height="16" rx="2" fill="rgba(255,255,255,0.55)"/>
