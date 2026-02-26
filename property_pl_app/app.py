@@ -274,14 +274,17 @@ st.markdown("""
     .info-box {
         background: #EBF3FB; border-left: 4px solid #2F5496;
         padding: 12px 16px; border-radius: 4px; margin: 8px 0;
+        color: #1A237E !important;
     }
     .success-box {
         background: #E8F5E9; border-left: 4px solid #00B050;
         padding: 12px 16px; border-radius: 4px; margin: 8px 0;
+        color: #1B5E20 !important;
     }
     .warn-box {
         background: #FFF8E1; border-left: 4px solid #FFC000;
         padding: 12px 16px; border-radius: 4px; margin: 8px 0;
+        color: #5D4037 !important;
     }
     div[data-testid="stExpander"] { border: 1px solid #DEE2E6; border-radius: 6px; }
 </style>
@@ -397,27 +400,30 @@ if st.session_state.step == 0:
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(
-            '<div style="background:#EBF3FB;border-radius:8px;padding:16px;height:120px;">'
-            '<b>📄 Upload PDFs</b><br><br>'
+            '<div style="background:#EBF3FB;border-radius:10px;padding:20px 18px 18px;color:#1A237E;">'
+            '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📄 Upload PDFs</div>'
+            '<div style="font-size:13px;line-height:1.6;color:#2C3E7A;">'
             'Drop in your rental statements, bank records, utility bills, '
             'and tax invoices — the app reads them automatically.'
-            '</div>', unsafe_allow_html=True)
+            '</div></div>', unsafe_allow_html=True)
     with c2:
         st.markdown(
-            '<div style="background:#E8F5E9;border-radius:8px;padding:16px;height:120px;">'
-            '<b>🔍 Auto-Parse & Validate</b><br><br>'
+            '<div style="background:#E8F5E9;border-radius:10px;padding:20px 18px 18px;color:#1B5E20;">'
+            '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">🔍 Auto-Parse & Validate</div>'
+            '<div style="font-size:13px;line-height:1.6;color:#2E5E35;">'
             'Extracts amounts, dates, and P&amp;L categories. '
             'Cross-checks addresses against your property to flag wrong files.'
-            '</div>', unsafe_allow_html=True)
+            '</div></div>', unsafe_allow_html=True)
     with c3:
         st.markdown(
-            '<div style="background:#FFF8E1;border-radius:8px;padding:16px;height:120px;">'
-            '<b>📊 Generate Excel</b><br><br>'
+            '<div style="background:#FFF8E1;border-radius:10px;padding:20px 18px 18px;color:#5D4037;">'
+            '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📊 Generate Excel</div>'
+            '<div style="font-size:13px;line-height:1.6;color:#6D4C41;">'
             'Outputs a color-coded, formula-linked Excel workbook '
             'with a P&amp;L tab per property plus a portfolio summary dashboard.'
-            '</div>', unsafe_allow_html=True)
+            '</div></div>', unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div style="margin-bottom:32px;"></div>', unsafe_allow_html=True)
 
     # ── Two-column: step flow + supported PDFs ────────────────────────────────
     left, right = st.columns([3, 2])
@@ -458,7 +464,7 @@ After generating, download the updated Session JSON to replace your previous one
     with right:
         st.markdown("### Supported PDF types")
         st.markdown(
-            '<div style="background:#F8F9FA;border-radius:8px;padding:16px;">'
+            '<div style="background:#F8F9FA;border-radius:8px;padding:16px;color:#333;">'
 
             '<p><b>📋 Rental / Ownership Statement</b><br>'
             '<span style="color:#555;font-size:13px;">Property management disbursement reports — '
