@@ -565,6 +565,33 @@ for key, default in {
 MONTH_NAMES = {1:'January',2:'February',3:'March',4:'April',5:'May',6:'June',
                7:'July',8:'August',9:'September',10:'October',11:'November',12:'December'}
 
+# ── Auto-save Step 1 widget values on every re-render while on Step 1 ─────────
+# Streamlit ≥1.32 prunes widget-owned keys the moment those widgets stop
+# rendering.  By continuously writing to the plain dict _setup_cfg (not owned
+# by any widget), we guarantee the latest user inputs survive any navigation —
+# including sidebar clicks, which happen before "Next: Upload PDFs →" is ever
+# pressed.  The condition guards: only save when the widget keys actually exist
+# (i.e. Step 1 is the current page and widgets have been rendered at least once).
+if st.session_state.get('step') == 1 and 'setup_n_props' in st.session_state:
+    _n = int(st.session_state['setup_n_props'])
+    st.session_state['_setup_cfg'] = {
+        'n_props':  _n,
+        'fy_start': st.session_state.get('setup_fy_start', 7),
+        'fy_first': int(st.session_state.get('setup_fy_first', 2024)),
+        'fy_last':  int(st.session_state.get('setup_fy_last',  2029)),
+        'props': [
+            {
+                'name': st.session_state.get(f'name_{i}', f'IP#{i+1} — Property Name'),
+                'addr': st.session_state.get(f'addr_{i}', ''),
+                'pc':   st.session_state.get(f'pc_{i}',   ''),
+                'pp':   float(st.session_state.get(f'pp_{i}', 0.0) or 0),
+                'cv':   float(st.session_state.get(f'cv_{i}', 0.0) or 0),
+                'mg':   float(st.session_state.get(f'mg_{i}', 0.0) or 0),
+            }
+            for i in range(_n)
+        ],
+    }
+
 def make_fy_labels(first_year: int, last_year: int) -> list[str]:
     """Generate FY label list newest→oldest. e.g. first=2024, last=2029 → ['2029-30',...,'2024-25']"""
     return [f'{y}-{str(y+1)[2:]}' for y in range(last_year, first_year - 1, -1)]
@@ -629,7 +656,7 @@ with st.sidebar:
     if st.button("🔄 Start Over", use_container_width=True):
         for k in ['step', 'properties', 'parsed_results',
                   'session_loaded', 'merge_change_log',
-                  'parse_done', 'uploaded_files_meta']:
+                  'parse_done', 'uploaded_files_meta', '_setup_cfg']:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -1725,6 +1752,86 @@ elif st.session_state.step == 4:
 
     st.markdown("---")
     st.markdown("#### ⚙️ Generation Settings")
+
+    # ── Theme selector ─────────────────────────────────────────────────────
+    st.markdown("##### 🎨 Excel Theme")
+
+    THEME_META = {
+        'navy': {
+            'label': '🏛️ Navy Professional',
+            'tagline': 'Corporate · Tax-ready · Formal',
+            'swatches': [
+                ('#1F3864', 'Header'),
+                ('#2F5496', 'Section'),
+                ('#C8E6C9', '🟢 Income'),
+                ('#FFCDD2', '🔴 Expense'),
+                ('#EBF3FB', '🔵 Net'),
+                ('#ECE8F5', '🟣 Cash Flow'),
+            ],
+        },
+        'sage': {
+            'label': '🌿 Slate & Sage',
+            'tagline': 'Modern · Clean · Self-managed',
+            'swatches': [
+                ('#2E4057', 'Header'),
+                ('#445566', 'Section'),
+                ('#B7E4C7', '🟢 Income'),
+                ('#FFC8C8', '🔴 Expense'),
+                ('#E8F4F8', '🔵 Net'),
+                ('#FEF9E7', '🟣 Cash Flow'),
+            ],
+        },
+        'charcoal': {
+            'label': '⚫ Charcoal & Amber',
+            'tagline': 'High-contrast · Screen-first · Bold',
+            'swatches': [
+                ('#2C2C2C', 'Header'),
+                ('#FF9F0A', 'Section accent'),
+                ('#B9F0C5', '🟢 Income'),
+                ('#FFC8C0', '🔴 Expense'),
+                ('#F0F4FA', '🔵 Net'),
+                ('#FAF5E4', '🟣 Cash Flow'),
+            ],
+        },
+    }
+
+    theme_keys   = list(THEME_META.keys())
+    theme_labels = [THEME_META[k]['label'] for k in theme_keys]
+
+    saved_theme = st.session_state.get('excel_theme', 'navy')
+    saved_idx   = theme_keys.index(saved_theme) if saved_theme in theme_keys else 0
+
+    selected_label = st.radio(
+        'Select a colour theme for the Excel workbook',
+        theme_labels,
+        index=saved_idx,
+        horizontal=True,
+        key='theme_radio',
+        label_visibility='collapsed',
+    )
+    selected_theme = theme_keys[theme_labels.index(selected_label)]
+    st.session_state['excel_theme'] = selected_theme
+
+    # Swatch preview for selected theme
+    meta = THEME_META[selected_theme]
+    swatch_html = (
+        f'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;'
+        f'padding:10px 14px;background:#f8f9fa;border-radius:8px;margin-bottom:8px;">'
+        f'<span style="font-size:13px;font-weight:600;color:#333;margin-right:4px;">'
+        f'{meta["label"]}</span>'
+        f'<span style="font-size:12px;color:#666;margin-right:10px;">— {meta["tagline"]}</span>'
+    )
+    for hex_color, name in meta['swatches']:
+        swatch_html += (
+            f'<div style="display:flex;align-items:center;gap:4px;">'
+            f'<div style="width:22px;height:22px;border-radius:4px;background:{hex_color};'
+            f'border:1px solid #ccc;flex-shrink:0;"></div>'
+            f'<span style="font-size:11px;color:#555;">{name}</span>'
+            f'</div>'
+        )
+    swatch_html += '</div>'
+    st.markdown(swatch_html, unsafe_allow_html=True)
+
     c1, c2 = st.columns(2)
     with c1:
         output_name = st.text_input("Output filename", value="Property_PL_Portfolio.xlsx")
@@ -1742,6 +1849,7 @@ elif st.session_state.step == 4:
                     fy_start_month= st.session_state.fy_start_month,
                     fy_labels     = st.session_state.fy_labels,
                     purchase_info = st.session_state.get('purchase_info', {}),
+                    theme         = st.session_state.get('excel_theme', 'navy'),
                 )
                 st.session_state['xlsx_bytes'] = xlsx_bytes
                 st.session_state['output_name'] = output_name
