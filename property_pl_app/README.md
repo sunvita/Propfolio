@@ -20,7 +20,7 @@ Open `http://localhost:8501` in your browser.
 | Step | What you do |
 |---|---|
 | ① Setup | Set number of properties, FY start month, FY range, and property details |
-| ② Upload PDFs | Drop in rental statements, bank records, utility bills, invoices — auto-parsed |
+| ② Upload files | Drop in rental statements, bank records (PDF/CSV/TSV), utility bills, invoices — auto-parsed |
 | ③ Review & Edit | Check editable data tables · Add fixed/recurring expenses via ⚡ Add Entry |
 | ④ Generate Excel | Pick a colour theme · Download workbook + Session JSON |
 
@@ -30,14 +30,14 @@ Open `http://localhost:8501` in your browser.
 
 ---
 
-## Supported PDF Types
+## Supported File Types
 
-| Type | What's extracted |
-|---|---|
-| Rental / Ownership Statement | Rental income, management fees, net EFT amount, itemised bill expenses |
-| Bank Statement | Transactions auto-categorised into P&L items (mortgage, repairs, insurance, etc.) |
-| Utility Bill | Electricity, water, gas, internet — mapped to the correct utility line |
-| Tax Invoice / Notice | Council rates, land tax, strata levies, building insurance, trade invoices |
+| Type | Format | What's extracted |
+|---|---|---|
+| Rental / Ownership Statement | PDF | Rental income, management fees, net EFT amount, itemised bill expenses |
+| Bank Statement | PDF · CSV · TSV | Transactions auto-categorised into P&L items (mortgage, repairs, insurance, etc.) |
+| Utility Bill | PDF | Electricity, water, gas, internet — mapped to the correct utility line |
+| Tax Invoice / Notice | PDF | Council rates, land tax, strata levies, building insurance, trade invoices |
 
 ---
 
@@ -64,13 +64,4 @@ Add any expense not captured in a PDF — fixed, recurring, or one-off:
 
 ## Address Validation
 
-For every non-bank PDF, the app extracts the property address and compares it to your Setup address:
-
-| Status | Meaning | Default |
-|---|---|---|
-| ✅ Matched | Address confirmed | Included |
-| ⚠️ Partial | Same suburb, verify number/unit | Included |
-| ❌ Mismatch | Different postcode or address | Excluded |
-| ⚪ Not found | No address in PDF | Included |
-
-Override any decision with the **Include in P&L** checkbox in Step 2.
+For every non-bank PDF, the app checks the property address against what you entered in Setup. Each file shows an **Include in P&L** checkbox — tick it to include or untick to exclude.

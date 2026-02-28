@@ -5,7 +5,7 @@ PDF parsers for property P&L:
   3. Utility bills  (electricity, water, gas, internet)
   4. Invoices / Notices  (council rates, land tax, strata, insurance, trades, etc.)
 
-Parser version: 2026-02-28-v13
+Parser version: 2026-02-28-v1.0
 """
 
 import re

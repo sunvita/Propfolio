@@ -756,24 +756,35 @@ In **Setup**, open **"Restore from Excel"** and upload your workbook. The app re
 """)
 
     with right:
-        st.markdown("### Supported PDF types")
+        st.markdown("### Supported file types")
         st.markdown(
             '<div style="background:#F8F9FA;border-radius:8px;padding:16px;color:#333;">'
 
-            '<p><b>📋 Rental / Ownership Statement</b><br>'
+            '<p><b>📋 Rental / Ownership Statement</b> '
+            '<span style="background:#E3F2FD;color:#1565C0;font-size:11px;'
+            'font-weight:600;padding:1px 6px;border-radius:4px;">PDF</span><br>'
             '<span style="color:#555;font-size:13px;">Property management disbursement reports — '
             'extracts rental income, management fees, and EFT amount.</span></p>'
 
-            '<p><b>🏦 Bank Statement</b><br>'
+            '<p><b>🏦 Bank Statement</b> '
+            '<span style="background:#E3F2FD;color:#1565C0;font-size:11px;'
+            'font-weight:600;padding:1px 6px;border-radius:4px;">PDF</span> '
+            '<span style="background:#E8F5E9;color:#2E7D32;font-size:11px;'
+            'font-weight:600;padding:1px 6px;border-radius:4px;">CSV · TSV</span><br>'
             '<span style="color:#555;font-size:13px;">Transaction history — '
             'auto-categorises debits/credits into P&amp;L items '
-            '(mortgage, repairs, insurance, etc.).</span></p>'
+            '(mortgage, repairs, insurance, etc.). '
+            'CSV/TSV exports from Westpac, CBA, ANZ, NAB and others are supported.</span></p>'
 
-            '<p><b>💡 Utility Bill</b><br>'
+            '<p><b>💡 Utility Bill</b> '
+            '<span style="background:#E3F2FD;color:#1565C0;font-size:11px;'
+            'font-weight:600;padding:1px 6px;border-radius:4px;">PDF</span><br>'
             '<span style="color:#555;font-size:13px;">Electricity, water, gas, or internet bills — '
             'detects provider and maps to the correct utility line.</span></p>'
 
-            '<p><b>🧾 Tax Invoice / Notice</b><br>'
+            '<p><b>🧾 Tax Invoice / Notice</b> '
+            '<span style="background:#E3F2FD;color:#1565C0;font-size:11px;'
+            'font-weight:600;padding:1px 6px;border-radius:4px;">PDF</span><br>'
             '<span style="color:#555;font-size:13px;">Council rates, land tax assessments, '
             'strata levies, building insurance, and trade invoices '
             '(plumber, electrician, painter, etc.).</span></p>'
@@ -783,16 +794,10 @@ In **Setup**, open **"Restore from Excel"** and upload your workbook. The app re
         st.markdown("### Address validation")
         st.markdown(
             '<div style="background:#F8F9FA;border-radius:8px;padding:16px;">'
-            '<p style="font-size:13px;color:#333;">'
-            'For every non-bank PDF, the app extracts the property address and '
-            'compares it to the address you entered in Setup.</p>'
-            '<p style="font-size:13px;">'
-            '✅ <b>Matched</b> — included automatically<br>'
-            '⚠️ <b>Partial</b> — included, please verify<br>'
-            '❌ <b>Mismatch</b> — excluded by default<br>'
-            '⚪ <b>Not found</b> — included, your call</p>'
-            '<p style="font-size:13px;color:#555;">'
-            'You can override any decision with the <b>Include in P&amp;L</b> checkbox.</p>'
+            '<p style="font-size:13px;color:#333;margin:0;">'
+            'For every non-bank PDF, the app checks the property address against '
+            'what you entered in Setup. Each file shows an <b>Include in P&amp;L</b> '
+            'checkbox — tick it to include or untick to exclude.</p>'
             '</div>', unsafe_allow_html=True)
 
         st.markdown("### Output Excel")
@@ -996,11 +1001,11 @@ elif st.session_state.step == 1:
             f'{preview_labels[-1]} → {preview_labels[0]}</div>',
             unsafe_allow_html=True
         )
-        st.markdown('<div class="info-box">📄 <b>Supported PDFs</b>:<br>'
-                    '• Property management / ownership statements<br>'
-                    '• Bank transaction statements<br>'
-                    '• Utility bills (electricity, water, gas, internet)<br>'
-                    '• Tax invoices (council rates, land tax, strata, insurance, trades)</div>',
+        st.markdown('<div class="info-box">📄 <b>Supported files</b>:<br>'
+                    '• Property management / ownership statements (PDF)<br>'
+                    '• Bank transaction statements (PDF · CSV · TSV)<br>'
+                    '• Utility bills — electricity, water, gas, internet (PDF)<br>'
+                    '• Tax invoices — council rates, land tax, strata, insurance, trades (PDF)</div>',
                     unsafe_allow_html=True)
 
     st.markdown("---")
