@@ -222,6 +222,134 @@ def _extract_tables(file_bytes: bytes) -> list:
     return tables
 
 
+def _extract_rental_from_tables(file_bytes: bytes) -> dict:
+    """
+    Tier B — table-based extraction.
+    Scans pdfplumber tables for label/value rows found in property management
+    software that renders proper grid tables (PropertyMe, Console, Palace, etc.).
+    Returns a partial dict with any fields found; may be empty.
+    """
+    found: dict = {}
+
+    # Maps label substrings → result field (most specific listed first)
+    LABEL_MAP = [
+        # ── money_in ───────────────────────────────────────────────────────
+        (['money in', 'total receipts', 'gross income', 'total income',
+          'total rent', 'rental income', 'income received',
+          'total trust receipts'], 'money_in'),
+        # ── money_out ──────────────────────────────────────────────────────
+        (['money out', 'total paid in agency', 'agency fee',
+          'management fee', 'total fees', 'total disbursements',
+          'total deductions', 'total charges', 'total expenses',
+          'total trust disbursements'], 'money_out'),
+        # ── eft ────────────────────────────────────────────────────────────
+        (['you received', 'eft to owner', 'withdrawal by eft',
+          'disbursement to owner', 'net amount', 'total forwarded',
+          'total remitted', 'net proceeds', 'owner payout',
+          'amount paid to owner', 'balance remaining',
+          'net owner payment', 'owner disbursement'], 'eft'),
+    ]
+
+    tables = _extract_tables(file_bytes)
+    for table in tables:
+        for row in table:
+            if not row or len(row) < 2:
+                continue
+            # Use first non-empty cell as the label
+            label = next((str(c).strip().lower() for c in row if c and str(c).strip()), '')
+            if not label:
+                continue
+            # Collect all positive numeric values beyond the label cell
+            amounts = [
+                v for v in (_parse_amount(c) for c in row[1:])
+                if v is not None and v > 0
+            ]
+            if not amounts:
+                continue
+            for keywords, field in LABEL_MAP:
+                if field in found:
+                    continue
+                if any(k in label for k in keywords):
+                    found[field] = amounts[0]
+                    break
+
+    return found
+
+
+def _llm_extract_rental(text: str) -> dict:
+    """
+    Tier C — LLM fallback using Claude API (Haiku).
+    Only called when both regex and table extraction return no figures.
+    Requires ANTHROPIC_API_KEY as an environment variable or Streamlit secret.
+    Returns a partial dict or {} on any error (silent degradation).
+    Cost: ~$0.0004 per call (negligible).
+    """
+    import os
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        try:
+            import streamlit as st          # only available at runtime
+            api_key = st.secrets.get('ANTHROPIC_API_KEY', '')
+        except Exception:
+            pass
+    if not api_key:
+        return {}
+
+    try:
+        import anthropic
+    except ImportError:
+        return {}  # package not installed — skip silently
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            "Extract the following fields from this rental/ownership statement.\n"
+            "Return ONLY a JSON object — no explanation, no markdown fences.\n"
+            "Keys:\n"
+            "  money_in  – total rental income received (number)\n"
+            "  money_out – total management/agency fees charged (number)\n"
+            "  eft       – net amount disbursed/transferred to the owner (number)\n"
+            "  year      – statement year (integer)\n"
+            "  month     – statement month, 1–12 (integer)\n"
+            "  address   – rental property street address (string)\n"
+            "Use null for any field you cannot confidently identify.\n\n"
+            f"Statement text:\n{text[:3000]}"
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        # Strip any accidental markdown code fences
+        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+
+        import json
+        data = json.loads(raw)
+
+        result: dict = {}
+        for key in ('money_in', 'money_out', 'eft'):
+            v = data.get(key)
+            if v is not None:
+                try:
+                    result[key] = float(v)
+                except (TypeError, ValueError):
+                    pass
+        for key in ('year', 'month'):
+            v = data.get(key)
+            if v is not None:
+                try:
+                    result[key] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        if data.get('address'):
+            result['address'] = str(data['address'])
+        return result
+
+    except Exception:
+        return {}  # any API / parse error — degrade silently
+
+
 def _parse_amount(s) -> float | None:
     if not s:
         return None
@@ -336,24 +464,102 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         'year': None, 'month': None,
         'money_in': 0.0, 'money_out': 0.0, 'eft': 0.0,
         'rooms': {}, 'pl_items': {}, 'raw_text': text[:2000],
+        'parse_source': 'regex',   # updated to 'table' or 'llm' if fallback used
     }
 
-    ym = _detect_year_month(text)
-    if ym:
-        result['year'], result['month'] = ym
+    # ── Date detection ──────────────────────────────────────────────────────
+    # Priority 1: Ailo/platform "Ownership statement [Month] [Year]"
+    _own_m = re.search(
+        r'ownership\s+statement\s+'
+        r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
+        r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|'
+        r'nov(?:ember)?|dec(?:ember)?)\s+(\d{4})',
+        text, re.IGNORECASE
+    )
+    if _own_m:
+        _month = MONTH_MAP.get(_own_m.group(1).lower()[:3])
+        _year  = int(_own_m.group(2))
+        if _month:
+            result['year'], result['month'] = _year, _month
+    else:
+        # Priority 2: "Statement period  1 [Month] [Year] — 30 [Month] [Year]"
+        # Use the END date of the period (closing month)
+        _period_m = re.search(
+            r'statement\s+period[:\s]*\d{1,2}\s+\w+\s+\d{4}\s*[—\-–]+\s*\d{1,2}\s+'
+            r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
+            r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|'
+            r'nov(?:ember)?|dec(?:ember)?)\s+(\d{4})',
+            text, re.IGNORECASE
+        )
+        if _period_m:
+            _month = MONTH_MAP.get(_period_m.group(1).lower()[:3])
+            _year  = int(_period_m.group(2))
+            if _month:
+                result['year'], result['month'] = _year, _month
+        else:
+            ym = _detect_year_month(text)
+            if ym:
+                result['year'], result['month'] = ym
 
-    for label, key in [
-        (r'money\s+in[:\s]+\$?([\d,]+\.?\d*)',   'money_in'),
-        (r'money\s+out[:\s]+\$?([\d,]+\.?\d*)',  'money_out'),
-        (r'eft[^$\d]*\$?([\d,]+\.?\d*)',          'eft'),
-        (r'net\s+amount[:\s]+\$?([\d,]+\.?\d*)', 'eft'),
-    ]:
-        m = re.search(label, text, re.IGNORECASE)
-        if m:
-            val = _parse_amount(m.group(1))
-            if val is not None:
-                result[key] = val
+    # ── Address detection ────────────────────────────────────────────────────
+    # Priority 1 (Ailo): extract property address from "Room N, [address] Net income:"
+    _addr_m = re.search(r'Room\s+\d+,\s+(.+?)\s+Net income:', text, re.IGNORECASE)
+    if _addr_m:
+        result['extracted_address'] = re.sub(r'\s+', ' ', _addr_m.group(1).strip())
+    else:
+        result['extracted_address'] = _extract_address(text)
 
+    # ── Financial figures ────────────────────────────────────────────────────
+    # Detect Ailo platform format ("Ownership statement" header present)
+    _is_ailo = bool(re.search(r'ownership\s+statement\s+\w+\s+\d{4}', text, re.IGNORECASE))
+
+    if _is_ailo:
+        # money_in: "Income   $780.00  $0.00  $780.00"  → first $ value (In column)
+        _m = re.search(r'^\s*Income\s+\$([\d,]+\.?\d*)', text, re.IGNORECASE | re.MULTILINE)
+        if _m:
+            result['money_in'] = _parse_amount(_m.group(1)) or 0.0
+
+        # money_out: "Total paid in agency fees  $85.80"
+        _m = re.search(r'Total\s+paid\s+in\s+agency\s+fees\s+\$([\d,]+\.?\d*)',
+                       text, re.IGNORECASE)
+        if _m:
+            result['money_out'] = _parse_amount(_m.group(1)) or 0.0
+
+        # eft: sum of all per-room "Net income: $X" values
+        # This equals money_in minus ALL expenses (fees + bills) = true net to owner
+        _net_vals = re.findall(r'Net income:\s+\$([\d,]+\.?\d*)', text, re.IGNORECASE)
+        if _net_vals:
+            result['eft'] = round(sum(_parse_amount(v) or 0.0 for v in _net_vals), 2)
+        elif result['money_in'] > 0:
+            # Fallback: Income_in minus Expenses_out column
+            _exp_m = re.search(
+                r'^\s*Expenses\s+\$[\d,]+\.?\d*\s+\$([\d,]+\.?\d*)',
+                text, re.IGNORECASE | re.MULTILINE
+            )
+            if _exp_m:
+                _exp_out = _parse_amount(_exp_m.group(1)) or 0.0
+                result['eft'] = round(result['money_in'] - _exp_out, 2)
+
+    else:
+        # Generic patterns for other management platforms
+        # (e.g. "Money In / Money Out / You Received / EFT to owner")
+        for _label, _key in [
+            (r'money\s+in[:\s]+\$?([\d,]+\.?\d*)',                     'money_in'),
+            (r'money\s+out[:\s]+\$?([\d,]+\.?\d*)',                    'money_out'),
+            (r'you\s+received[:\s]+\$?([\d,]+\.?\d*)',                 'eft'),
+            (r'withdrawal\s+by\s+eft[^$\n]{0,60}\$?([\d,]+\.?\d*)',   'eft'),
+            (r'eft\s+to\s+owner[^$\n]{0,30}\$?([\d,]+\.?\d*)',        'eft'),
+            (r'eft[^$\d\n]{0,20}\$?([\d,]+\.?\d*)',                    'eft'),
+            (r'net\s+amount[:\s]+\$?([\d,]+\.?\d*)',                   'eft'),
+            (r'disbursement\s+to\s+owner[:\s]+\$?([\d,]+\.?\d*)',     'eft'),
+        ]:
+            _m = re.search(_label, text, re.IGNORECASE)
+            if _m:
+                _val = _parse_amount(_m.group(1))
+                if _val is not None and (result[_key] == 0.0 or _key == 'eft'):
+                    result[_key] = _val
+
+    # ── Room breakdown ───────────────────────────────────────────────────────
     room_pattern = re.compile(
         r'(room\s*\d+|unit\s*\w+)[^\d$]*\$?([\d,]+\.?\d*)[^\d$]*\$?([\d,]+\.?\d*)',
         re.IGNORECASE
@@ -364,11 +570,43 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         mgmt = _parse_amount(m.group(3)) or 0
         result['rooms'][room_name] = {'rent': rent, 'mgmt': mgmt, 'net': round(rent - mgmt, 2)}
 
+    # ── Tier B: table fallback ─────────────────────────────────────────────
+    # Trigger when regex extracted nothing meaningful
+    if result['money_in'] == 0.0 and result['eft'] == 0.0:
+        _tbl = _extract_rental_from_tables(file_bytes)
+        _any_table = False
+        for _k in ('money_in', 'money_out', 'eft'):
+            if _tbl.get(_k, 0.0) > 0.0:
+                result[_k] = _tbl[_k]
+                _any_table = True
+        if _any_table:
+            result['parse_source'] = 'table'
+
+    # ── Tier C: LLM fallback ───────────────────────────────────────────────
+    # Trigger only if table extraction also found nothing
+    if result['money_in'] == 0.0 and result['eft'] == 0.0:
+        _llm = _llm_extract_rental(text)
+        _any_llm = False
+        for _k in ('money_in', 'money_out', 'eft'):
+            if _llm.get(_k, 0.0) > 0.0:
+                result[_k] = _llm[_k]
+                _any_llm = True
+        # LLM can also fill in missing date / address
+        if _llm.get('year') and not result['year']:
+            result['year'] = _llm['year']
+        if _llm.get('month') and not result['month']:
+            result['month'] = _llm['month']
+        if _llm.get('address') and not result.get('extracted_address'):
+            result['extracted_address'] = _llm['address']
+        if _any_llm:
+            result['parse_source'] = 'llm'
+        else:
+            result['parse_source'] = 'failed'
+
     result['pl_items'] = {
         'Rental Income':   result['money_in'],
         'Management Fees': result['money_out'],
     }
-    result['extracted_address'] = _extract_address(text)
     return result
 
 
