@@ -1130,11 +1130,45 @@ elif st.session_state.step == 2:
                     elif _src == 'failed':
                         st.warning("⚠️ Could not extract values automatically. Please enter them manually below.")
                     if result.get('rooms'):
+                        st.markdown("**Room Breakdown**")
                         st.dataframe(
                             pd.DataFrame(result['rooms']).T.rename(
                                 columns={'rent': 'Rent', 'mgmt': 'Mgmt Fee', 'net': 'Net'}),
                             use_container_width=True
                         )
+
+                    # ── Expense line items ──────────────────────────────────
+                    _expenses = {
+                        k: v for k, v in result.get('pl_items', {}).items()
+                        if k not in ('Rental Income', 'Management Fees') and v > 0
+                    }
+                    if _expenses:
+                        st.markdown("**Expenses**")
+                        _exp_rows = [{'Category': k, 'Amount': f"${v:,.2f}"}
+                                     for k, v in sorted(_expenses.items())]
+                        st.dataframe(pd.DataFrame(_exp_rows), use_container_width=True,
+                                     hide_index=True)
+
+                    # ── P&L reconciliation summary ──────────────────────────
+                    _money_in  = result.get('money_in', 0)
+                    _money_out = result.get('money_out', 0)
+                    _eft       = result.get('eft', 0)
+                    _exp_total = sum(_expenses.values())
+                    _calc_net  = round(_money_in - _money_out - _exp_total, 2)
+                    _match     = abs(_calc_net - _eft) < 0.02
+                    st.markdown(
+                        f"<div style='background:{'#E8F5E9' if _match else '#FFF3E0'};"
+                        f"border-left:4px solid {'#388E3C' if _match else '#F57C00'};"
+                        f"padding:8px 12px;border-radius:4px;margin-top:6px;font-size:14px;'>"
+                        f"<b>P&amp;L check:</b> &nbsp;"
+                        f"${_money_in:,.2f} income &minus; ${_money_out:,.2f} mgmt"
+                        + (f" &minus; ${_exp_total:,.2f} expenses" if _exp_total else "")
+                        + f" = <b>${_calc_net:,.2f}</b> &nbsp;"
+                        + (f"✅ matches EFT ${_eft:,.2f}" if _match
+                           else f"⚠️ expected EFT ${_eft:,.2f}")
+                        + "</div>",
+                        unsafe_allow_html=True
+                    )
 
                 elif result['type'] == 'bank':
                     txns = result.get('transactions', [])

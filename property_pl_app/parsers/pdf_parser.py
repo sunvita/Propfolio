@@ -5,7 +5,7 @@ PDF parsers for property P&L:
   3. Utility bills  (electricity, water, gas, internet)
   4. Invoices / Notices  (council rates, land tax, strata, insurance, trades, etc.)
 
-Parser version: 2025-02-28-v3
+Parser version: 2026-02-28-v8
 """
 
 import re
@@ -157,6 +157,9 @@ BANK_CATEGORIES = {
     'junk removal':         ('opex',      'Cleaning'),
     'skip bin':             ('opex',      'Cleaning'),
     # Gardening & grounds
+    'lawn mowing':          ('opex',      'Cleaning'),
+    'mowing service':       ('opex',      'Cleaning'),
+    'mowing and maintenance': ('opex',    'Cleaning'),
     'lawn':                 ('opex',      'Cleaning'),
     'mowing':               ('opex',      'Cleaning'),
     'mow ':                 ('opex',      'Cleaning'),
@@ -223,64 +226,172 @@ BANK_CATEGORIES = {
 }
 
 # ── Invoice type detection: keywords → P&L category ─────────────────────────
+# Ordered most-specific first.  parse_invoice() tries these then falls back to
+# _categorize_by_keywords() so this list and BANK_CATEGORIES stay in sync.
 INVOICE_CATEGORY_MAP = [
-    # (keyword list, section, pl_category)
-    (['council rates', 'rates notice', 'rate notice',
-      'municipal rates', 'local council', 'council levy', 'quarterly rates',
+    # ── Government & statutory ──────────────────────────────────────────────
+    (['council rates', 'rates notice', 'rate notice', 'municipal rates',
+      'local council', 'council levy', 'quarterly rates',
       'local government rates', 'government rates and charges',
       'rates and charges', 'general grv', 'grv valuation',
       'rubbish/recycling service', 'rubbish recycling service',
-      'emergency services levy'],
+      'emergency services levy', 'waste management charge',
+      'environmental levy', 'general rate'],
      'opex', 'Council Rates'),
 
     (['land tax', 'land value tax', 'state revenue office', 'revenue nsw',
-      'notice of assessment', 'land tax assessment'],
+      'notice of assessment', 'land tax assessment', 'office of state revenue',
+      'state revenue', 'revenue office'],
      'opex', 'Land Tax'),
 
     (['strata levy', 'body corporate', 'owners corporation',
-      'strata management', 'strata plan', 'administrative fund',
-      'sinking fund', 'capital works fund'],
+      'owners corp', 'strata management', 'strata plan',
+      'administrative fund', 'admin fund', 'sinking fund',
+      'capital works fund', 'maintenance fund', 'special levy',
+      'lot levy', 'unit entitlement'],
      'opex', 'Strata / Body Corporate'),
 
     (['landlord insurance', 'building insurance', 'property insurance',
-      'insurance premium', 'policy renewal', 'certificate of insurance'],
+      'home insurance', 'rental insurance', 'investment property insurance',
+      'insurance premium', 'policy renewal', 'certificate of insurance',
+      'insurance certificate', 'policy schedule'],
      'opex', 'Building Insurance'),
 
-    (['handyman', 'trade services', 'pest control', 'termite',
-      'plumber', 'plumbing', 'electrician', 'electrical',
-      'locksmith', 'painter', 'carpentry', 'carpenter',
-      'roofing', 'roofer', 'gutters', 'gutter', 'air conditioning',
-      'hvac', 'hot water system', 'carpet', 'tiling', 'tile',
-      'concreting', 'fencing', 'fence'],
-     'opex', 'Maintenance & Repairs'),
-
-    (['cleaning service', 'bond clean', 'end of lease clean',
-      'lawn mowing', 'garden maintenance', 'landscaping',
-      'rubbish removal', 'window cleaning'],
-     'opex', 'Cleaning'),
-
-    (['property management', 'management fee', 'management agreement'],
+    # ── Management & letting ────────────────────────────────────────────────
+    (['property management', 'management fee', 'management agreement',
+      'property manager', 'admin fee', 'administration fee'],
      'opex', 'Management Fees'),
 
-    (['letting fee', 'leasing fee', 'tenant placement'],
+    (['letting fee', 'leasing fee', 'tenant placement', 'lease renewal fee',
+      'reletting fee', 'new tenant fee', 'placement fee'],
      'opex', 'Letting Fees'),
 
-    (['real estate photography', 'advertising', 'domain listing',
-      'realestate.com', 'marketing'],
+    (['advertising', 'real estate photography', 'domain listing',
+      'realestate.com', 'marketing', 'listing fee', 'portal fee',
+      'photography', 'floor plan', 'signboard'],
      'opex', 'Advertising'),
 
-    (['electricity', 'energy usage', 'kwh', 'power bill',
-      'electricity charge'],
+    # ── Maintenance & Repairs ───────────────────────────────────────────────
+    # Plumbing
+    (['plumbing', 'plumber', 'blocked drain', 'drain cleaning',
+      'drain inspection', 'tap repair', 'tap replacement',
+      'toilet repair', 'toilet replacement', 'cistern', 'pipe repair',
+      'hot water system', 'hot water unit', 'water heater',
+      'tempering valve', 'pressure relief', 'backflow'],
+     'opex', 'Maintenance & Repairs'),
+    # Electrical
+    (['electrician', 'electrical', 'wiring', 'rewiring', 'switchboard',
+      'light fitting', 'light globe', 'smoke alarm', 'smoke detector',
+      'safety switch', 'rcd', 'power point', 'power outlet',
+      'exhaust fan', 'ceiling fan'],
+     'opex', 'Maintenance & Repairs'),
+    # Locks & access
+    (['locksmith', 'lock replacement', 'key cutting', 'key duplication',
+      'access card', 'deadbolt', 'door lock', 'door handle',
+      'door knob', 'security door', 'intercom'],
+     'opex', 'Maintenance & Repairs'),
+    # Pest & vermin
+    (['pest control', 'termite', 'termite inspection', 'vermin',
+      'rodent', 'cockroach', 'ant treatment', 'mosquito treatment',
+      'bird control', 'spider treatment'],
+     'opex', 'Maintenance & Repairs'),
+    # Roofing & structure
+    (['roofing', 'roof repair', 'roof replacement', 'roof inspection',
+      'gutters', 'gutter replacement', 'gutter guard', 'downpipe',
+      'fascia', 'soffit', 'ceiling repair', 'wall repair', 'wall crack',
+      'plaster', 'plasterer', 'rendering', 'waterproofing', 'membrane',
+      'structural repair', 'subsidence', 'underpinning'],
+     'opex', 'Maintenance & Repairs'),
+    # Flooring (use specific forms to avoid colliding with "carpet cleaning")
+    (['carpet replacement', 'carpet repair', 'carpet laying', 'carpet install',
+      'carpet supply', 'new carpet', 'flooring', 'floor replacement',
+      'tiling', 'tile replacement', 'tile repair', 'grout',
+      'floorboard', 'timber floor', 'vinyl flooring', 'laminate',
+      'floating floor', 'floor polishing', 'floor sanding'],
+     'opex', 'Maintenance & Repairs'),
+    # Painting & cosmetic
+    (['painting', 'painter', 'interior paint', 'exterior paint',
+      'touch up', 'patching', 'wall patching', 'spackle',
+      'render paint', 'feature wall'],
+     'opex', 'Maintenance & Repairs'),
+    # Doors, windows & glazing
+    (['glazier', 'window repair', 'window replacement', 'glass repair',
+      'glass replacement', 'screen repair', 'screen replacement',
+      'flyscreen', 'door repair', 'door replacement', 'roller door',
+      'garage door', 'sliding door', 'cavity door', 'window seal',
+      'window lock', 'window latch'],
+     'opex', 'Maintenance & Repairs'),
+    # HVAC & appliances
+    (['air conditioning', 'air conditioner', 'air con', 'aircon',
+      'hvac', 'split system', 'ducted air', 'evaporative cooler',
+      'reverse cycle', 'gas heater', 'electric heater', 'appliance repair',
+      'appliance replacement', 'oven repair', 'cooktop repair',
+      'dishwasher repair', 'washing machine repair', 'dryer repair',
+      'rangehood repair', 'rangehood replacement', 'range hood'],
+     'opex', 'Maintenance & Repairs'),
+    # Fencing, gates & external
+    (['fencing', 'fence repair', 'fence replacement', 'gate repair',
+      'gate replacement', 'concreting', 'driveway', 'driveway repair',
+      'paving', 'path repair', 'retaining wall', 'retaining wall repair',
+      'carpentry', 'carpenter', 'joinery', 'cabinet repair',
+      'cabinet replacement', 'shelving', 'deck repair', 'decking'],
+     'opex', 'Maintenance & Repairs'),
+    # Pool & spa
+    (['pool service', 'pool maintenance', 'pool repair', 'pool pump',
+      'pool filter', 'pool chemical', 'pool fence', 'pool inspection',
+      'spa repair', 'spa service', 'hot tub repair'],
+     'opex', 'Maintenance & Repairs'),
+    # General trade catch-all (after specific trades above)
+    (['handyman', 'trade service', 'general repair', 'general maintenance',
+      'property maintenance', 'building maintenance', 'property repair',
+      'building repair', 'maintenance call', 'repair call'],
+     'opex', 'Maintenance & Repairs'),
+
+    # ── Cleaning ────────────────────────────────────────────────────────────
+    (['bond clean', 'end of lease clean', 'vacate clean', 'exit clean',
+      'move out clean', 'move-out clean', 'departure clean',
+      'deep clean', 'spring clean', 'cleaning service', 'clean service',
+      'pressure wash', 'pressure cleaning', 'high pressure clean',
+      'window cleaning', 'window wash', 'carpet cleaning', 'steam clean',
+      'rubbish removal', 'waste removal', 'junk removal', 'skip bin',
+      'bin hire', 'hard rubbish', 'green waste'],
+     'opex', 'Cleaning'),
+    (['lawn mowing', 'lawn care', 'lawn service', 'lawn maintenance',
+      'garden maintenance', 'gardening service', 'garden service',
+      'garden clean up', 'garden cleanup', 'landscaping',
+      'hedge trimming', 'hedging', 'pruning', 'tree lopping',
+      'tree trimming', 'tree removal', 'tree service', 'arborist',
+      'stump removal', 'weeding', 'mulching', 'irrigation',
+      'turf', 'turf laying', 'reticulation'],
+     'opex', 'Cleaning'),
+
+    # ── Utilities ────────────────────────────────────────────────────────────
+    (['kwh', 'kilowatt', 'electricity charge', 'electricity usage',
+      'energy charge', 'energy usage', 'power bill', 'power charge',
+      'ausgrid', 'endeavour energy', 'essential energy', 'energex',
+      'ergon energy', 'western power', 'sa power networks',
+      'tas networks', 'agl', 'origin energy', 'energy australia',
+      'energyaustralia', 'simply energy', 'alinta energy',
+      'red energy', 'powershop', 'momentum energy', 'lumo energy'],
      'utilities', 'Electricity'),
 
-    (['water use', 'water service', 'sewerage', 'water usage',
-      'water consumption'],
+    (['water usage', 'water consumption', 'water service', 'water charge',
+      'sewerage charge', 'sewer charge', 'wastewater',
+      'sydney water', 'icon water', 'unitywater', 'queensland urban utilities',
+      'sa water', 'water corporation', 'taswater', 'power and water',
+      'yarra valley water', 'south east water', 'city west water',
+      'coliban water', 'central highlands water'],
      'utilities', 'Water'),
 
-    (['natural gas', 'gas usage', 'gas service charge'],
+    (['natural gas', 'gas usage', 'gas consumption', 'gas service charge',
+      'gas charge', 'gas supply', 'jemena', 'atco gas', 'kleenheat',
+      'bgaz', 'elgas', 'origin gas', 'gas bottle', 'lpg'],
      'utilities', 'Gas'),
 
-    (['internet service', 'broadband', 'nbn service', 'data usage'],
+    (['internet service', 'broadband service', 'nbn service', 'nbn charge',
+      'data usage', 'data charge', 'telstra', 'optus', 'iinet',
+      'aussie broadband', 'superloop', 'tpg', 'internode',
+      'dodo', 'tangerine', 'leaptel'],
      'utilities', 'Internet'),
 ]
 
@@ -408,6 +519,212 @@ def _extract_rental_from_tables(file_bytes: bytes) -> dict:
     return found
 
 
+def _get_secret(name: str) -> str:
+    """Return a secret from env or Streamlit secrets (silent if absent)."""
+    import os
+    val = os.environ.get(name, '')
+    if not val:
+        try:
+            import streamlit as st
+            val = st.secrets.get(name, '') or ''
+        except Exception:
+            pass
+    return val
+
+
+def _get_api_key() -> str:
+    """Return ANTHROPIC_API_KEY from env or Streamlit secrets (silent if absent)."""
+    import os
+    key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not key:
+        try:
+            import streamlit as st
+            key = st.secrets.get('ANTHROPIC_API_KEY', '') or ''
+        except Exception:
+            pass
+    return key
+
+
+# ── Self-learning category store ───────────────────────────────────────────────
+import json as _json
+import pathlib as _pathlib
+
+_LEARNED_FILE = _pathlib.Path(__file__).parent / 'learned_categories.json'
+_LOG_FILE     = _pathlib.Path(__file__).parent / 'category_learning_log.csv'
+
+# In-memory cache: keyword → (section, category)
+# Populated once at module load; updated live when new rules are saved.
+_learned_cache: dict = {}
+
+
+def _load_learned_categories() -> dict:
+    """Load keyword→category rules previously saved by the LLM fallback."""
+    try:
+        if _LEARNED_FILE.exists():
+            data = _json.loads(_LEARNED_FILE.read_text())
+            return {
+                item['keyword']: (item['section'], item['category'])
+                for item in data
+                if isinstance(item, dict) and 'keyword' in item
+            }
+    except Exception:
+        pass
+    return {}
+
+
+def _save_learned_category(keyword: str, section: str, category: str,
+                            description: str = '') -> None:
+    """
+    Persist a newly learned keyword→category mapping.
+    Updates in-memory cache immediately so subsequent calls in the same session
+    benefit without re-loading the file.
+    Also appends to a human-readable CSV log for review.
+    """
+    global _learned_cache
+    import csv, datetime
+
+    keyword = keyword.lower().strip()
+    if not keyword or len(keyword) < 3:
+        return
+
+    # Update live cache
+    _learned_cache[keyword] = (section, category)
+
+    # Write to JSON (append only — skip duplicates)
+    updated_list: list = []
+    try:
+        existing: list = []
+        if _LEARNED_FILE.exists():
+            existing = _json.loads(_LEARNED_FILE.read_text())
+        known_kws = {item.get('keyword', '') for item in existing if isinstance(item, dict)}
+        if keyword not in known_kws:
+            existing.append({'keyword': keyword, 'section': section, 'category': category})
+            _LEARNED_FILE.write_text(_json.dumps(existing, indent=2))
+            updated_list = existing   # only push to GitHub when actually changed
+    except Exception:
+        pass
+
+    # Auto-commit to GitHub repo (requires GITHUB_TOKEN in Streamlit secrets)
+    if updated_list:
+        _push_to_github(updated_list, keyword)
+
+    # Append to CSV log
+    try:
+        write_header = not _LOG_FILE.exists()
+        with _LOG_FILE.open('a', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            if write_header:
+                w.writerow(['timestamp', 'keyword', 'section', 'category', 'description'])
+            w.writerow([
+                datetime.datetime.now().isoformat(),
+                keyword, section, category,
+                description[:120].replace('\n', ' ')
+            ])
+    except Exception:
+        pass
+
+
+def _push_to_github(content: list, new_keyword: str = '') -> None:
+    """
+    Auto-commit learned_categories.json back to the GitHub repo.
+    Requires GITHUB_TOKEN and GITHUB_REPO in Streamlit secrets (or env).
+    Silently skips if secrets are absent — no error surfaced to the user.
+    """
+    import urllib.request, urllib.error, base64
+
+    token = _get_secret('GITHUB_TOKEN')
+    repo  = _get_secret('GITHUB_REPO')           # e.g. sunvita/Propfolio
+    fpath = _get_secret('GITHUB_FILE_PATH')       # e.g. property_pl_app/parsers/learned_categories.json
+    if not (token and repo and fpath):
+        return
+
+    api = f"https://api.github.com/repos/{repo}/contents/{fpath}"
+    headers = {
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+    }
+
+    try:
+        # Step 1: get current file SHA (required for update)
+        req = urllib.request.Request(api, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            sha = _json.loads(r.read().decode())['sha']
+
+        # Step 2: PUT updated file
+        new_content = _json.dumps(content, indent=2, ensure_ascii=False)
+        body = _json.dumps({
+            'message': f'chore: learn category rule "{new_keyword}"',
+            'content': base64.b64encode(new_content.encode()).decode(),
+            'sha': sha,
+        }).encode()
+        req = urllib.request.Request(api, data=body, headers=headers, method='PUT')
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass  # network error, bad token, etc — degrade silently
+
+
+def _llm_categorise(description: str, doc_type: str = 'invoice') -> tuple | None:
+    """
+    Tier C — LLM categorisation fallback using Claude Haiku.
+    Called when all keyword rules return 'Miscellaneous'.
+    Returns (section, category, keyword_hint) on success, None on failure.
+
+    Cost: ~$0.00012/call.  Once a keyword_hint is learned and saved, that
+    description type will never reach the API again — cost asymptotes to zero.
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+
+    valid_categories = [
+        'Rental Income', 'Management Fees', 'Letting Fees',
+        'Maintenance & Repairs', 'Cleaning', 'Council Rates', 'Land Tax',
+        'Strata', 'Insurance', 'Advertising',
+        'Electricity', 'Water', 'Gas', 'Internet',
+        'Financing', 'Miscellaneous',
+    ]
+
+    prompt = (
+        "Categorise this Australian rental property expense for a landlord P&L.\n"
+        f"Document type: {doc_type}\n"
+        f"Description: {description[:300]}\n\n"
+        f"Valid categories: {', '.join(valid_categories)}\n\n"
+        "Return ONLY a JSON object (no markdown) with:\n"
+        "  section   – 'income', 'opex', or 'utilities'\n"
+        "  category  – one of the valid categories\n"
+        "  keyword   – the 1–4 word phrase from the description that best\n"
+        "              identifies the category (e.g. 'roof repair', NOT 'repair')\n"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=120,
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+        data = _json.loads(raw)
+        section  = str(data.get('section',  'opex')).strip()
+        category = str(data.get('category', 'Miscellaneous')).strip()
+        keyword  = str(data.get('keyword',  '')).lower().strip()
+        if category not in valid_categories or category == 'Miscellaneous':
+            return None  # don't persist "still unknown" entries
+        return (section, category, keyword)
+    except Exception:
+        return None
+
+
+# Populate the learned cache at module startup
+_learned_cache = _load_learned_categories()
+
+
 def _llm_extract_rental(text: str) -> dict:
     """
     Tier C — LLM fallback using Claude API (Haiku).
@@ -416,14 +733,7 @@ def _llm_extract_rental(text: str) -> dict:
     Returns a partial dict or {} on any error (silent degradation).
     Cost: ~$0.0004 per call (negligible).
     """
-    import os
-    api_key = os.environ.get('ANTHROPIC_API_KEY', '')
-    if not api_key:
-        try:
-            import streamlit as st          # only available at runtime
-            api_key = st.secrets.get('ANTHROPIC_API_KEY', '')
-        except Exception:
-            pass
+    api_key = _get_api_key()
     if not api_key:
         return {}
 
@@ -539,11 +849,17 @@ def _detect_year_month(text: str) -> tuple[int, int] | None:
 
 
 def _categorize_by_keywords(description: str) -> tuple[str, str]:
-    """Return (section, category) by matching BANK_CATEGORIES keywords.
-    Longer (more specific) keywords take priority over shorter ones so that
-    e.g. 'carpet clean' beats 'carpet', and 'garden maintenance' beats 'maintenance'.
+    """Return (section, category) by matching keywords.
+    Priority: learned rules (persisted from prior LLM calls) first,
+    then BANK_CATEGORIES.  Within each source, longer (more specific)
+    keywords beat shorter ones so 'garden maintenance' beats 'maintenance'.
     """
     desc_lower = description.lower()
+    # 1. Learned categories — highest priority
+    for kw in sorted(_learned_cache, key=len, reverse=True):
+        if kw in desc_lower:
+            return _learned_cache[kw]
+    # 2. Static BANK_CATEGORIES
     for kw in sorted(BANK_CATEGORIES, key=len, reverse=True):
         if kw in desc_lower:
             return BANK_CATEGORIES[kw]
@@ -728,14 +1044,42 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
 
     # ── Room breakdown ───────────────────────────────────────────────────────
     if _is_ailo:
-        # Ailo: "Room N, [address]  Net income: $X" — reliable, address numbers don't interfere
-        for _rm in re.finditer(
-            r'(Room\s+\d+),\s+[^\n]+?Net income:\s+\$([\d,]+\.?\d*)',
-            text, re.IGNORECASE
-        ):
-            _rname = _rm.group(1).strip().title()
-            _rnet  = _parse_amount(_rm.group(2)) or 0.0
-            result['rooms'][_rname] = {'rent': _rnet, 'mgmt': 0.0, 'net': _rnet}
+        # Ailo: identify REAL room headers by requiring "Net income:" on the same
+        # line.  Bill descriptions like "Room 1, 31 Fuller St monthly mow $80.00"
+        # are skipped because they don't contain "Net income:".
+        _room_positions = [
+            (m.start(), m.group(1), m.group(2))
+            for m in re.finditer(
+                r'(Room\s+\d+),\s+[^\n]+?Net income:\s+\$([\d,]+\.?\d*)',
+                text, re.IGNORECASE
+            )
+        ]
+        for _i, (_rstart, _rhead, _rnet_str) in enumerate(_room_positions):
+            # Segment: from this room header to the next REAL room header
+            _rend    = _room_positions[_i + 1][0] if _i + 1 < len(_room_positions) else _rstart + 2000
+            _segment = text[_rstart:_rend]
+
+            _rname = _rhead.strip().title()
+            _rnet  = _parse_amount(_rnet_str) or 0.0
+
+            # Per-room rent: first "Total $[in] $[out]" row (In column = gross rent)
+            # Must appear BEFORE any "Contributions" or "Transfer" block
+            _trans_cut = re.search(r'\n(Contributions|Transfer\s+to)', _segment, re.IGNORECASE)
+            _search_seg = _segment[:_trans_cut.start()] if _trans_cut else _segment
+            _tot = re.search(
+                r'Total\s+\$([\d,]+\.?\d*)\s+\$([\d,]+\.?\d*)',
+                _search_seg, re.IGNORECASE
+            )
+            _rrent = (_parse_amount(_tot.group(1)) or 0.0) if _tot else _rnet
+
+            # Per-room mgmt: explicit "Management fees $X" line (excludes bill expenses)
+            _mf = re.search(r'Management\s+fees\s+\$([\d,]+\.?\d*)', _search_seg, re.IGNORECASE)
+            _rmgmt = (_parse_amount(_mf.group(1)) or 0.0) if _mf else 0.0
+
+            result['rooms'][_rname] = {
+                'rent': _rrent, 'mgmt': _rmgmt,
+                'net':  _rnet,          # always from the authoritative Net income header
+            }
     else:
         # Generic: locate each room/unit heading then find its "Total $out $in" summary
         # row within the next 600 chars.  This avoids matching address numbers or
@@ -911,28 +1255,58 @@ def parse_utility_bill(file_bytes: bytes, filename: str = '') -> dict:
     if ym:
         result['year'], result['month'] = ym
 
-    # Detect utility type (order matters — more specific first)
-    if any(k in text_lower for k in ['kwh', 'electricity charge', 'energy charge',
-                                      'ausgrid', 'agl', 'origin energy',
-                                      'simply energy', 'alinta energy']):
+    # ── Detect utility type — most specific signals first ────────────────────
+    if any(k in text_lower for k in [
+            'kwh', 'kilowatt', 'electricity charge', 'electricity usage',
+            'energy charge', 'energy usage', 'power bill',
+            'ausgrid', 'endeavour energy', 'essential energy',
+            'energex', 'ergon energy', 'western power', 'sa power networks',
+            'tas networks', 'agl', 'origin energy', 'energy australia',
+            'energyaustralia', 'simply energy', 'alinta energy',
+            'red energy', 'powershop', 'momentum energy', 'lumo energy']):
         result['utility_type'] = 'Electricity'
-    elif any(k in text_lower for k in ['water use', 'water service', 'sewerage charge',
-                                        'sydney water', 'icon water', 'water consumption',
-                                        'water usage']):
+
+    elif any(k in text_lower for k in [
+            'water usage', 'water consumption', 'water service', 'water charge',
+            'sewerage charge', 'sewer charge', 'wastewater',
+            'sydney water', 'icon water', 'unitywater',
+            'queensland urban utilities', 'sa water', 'water corporation',
+            'taswater', 'power and water', 'yarra valley water',
+            'south east water', 'city west water',
+            'coliban water', 'central highlands water']):
         result['utility_type'] = 'Water'
-    elif any(k in text_lower for k in ['natural gas', 'gas usage', 'gas service charge',
-                                        'jemena', 'gas meter']):
+
+    elif any(k in text_lower for k in [
+            'natural gas', 'gas usage', 'gas consumption',
+            'gas service charge', 'gas charge', 'gas supply',
+            'jemena', 'atco gas', 'kleenheat', 'bgaz', 'elgas',
+            'lpg', 'gas meter', 'gas bottle']):
         result['utility_type'] = 'Gas'
-    elif any(k in text_lower for k in ['internet', 'broadband', 'nbn service',
-                                        'data usage', 'telstra', 'optus',
-                                        'iinet', 'aussie broadband']):
+
+    elif any(k in text_lower for k in [
+            'internet service', 'broadband', 'nbn service', 'nbn charge',
+            'data usage', 'telstra', 'optus', 'iinet', 'aussie broadband',
+            'superloop', 'tpg', 'internode', 'dodo', 'tangerine']):
         result['utility_type'] = 'Internet'
-    elif any(k in text_lower for k in ['water', 'gas', 'energy']):
-        # Broader fallback
-        if 'water' in text_lower:
-            result['utility_type'] = 'Water'
-        elif 'gas' in text_lower:
-            result['utility_type'] = 'Gas'
+
+    # ── Keyword fallback when no provider/signal matched ─────────────────────
+    if result['utility_type'] == 'Miscellaneous':
+        _sec, _cat = _categorize_by_keywords(text[:600])
+        if _sec == 'utilities':
+            result['utility_type'] = _cat
+
+    # ── LLM fallback when all keyword rules also failed ───────────────────────
+    if result['utility_type'] == 'Miscellaneous':
+        _llm_r = _llm_categorise(text[:400], doc_type='utility')
+        if _llm_r:
+            _, _cat, _kw = _llm_r
+            if _cat in ('Electricity', 'Water', 'Gas', 'Internet'):
+                result['utility_type'] = _cat
+                if _kw:
+                    _save_learned_category(
+                        _kw, 'utilities', _cat,
+                        description=text[:80].replace('\n', ' ')
+                    )
 
     result['amount'] = _extract_invoice_amount(text)
     result['extracted_address'] = _extract_address(text)
@@ -963,12 +1337,44 @@ def parse_invoice(file_bytes: bytes, filename: str = '') -> dict:
     if ym:
         result['year'], result['month'] = ym
 
-    # Detect category
+    # Vendor / issuer (first non-numeric line in the first 10 lines)
+    for line in text.splitlines()[:10]:
+        line = line.strip()
+        if line and len(line) > 3 and not line[0].isdigit():
+            result['vendor'] = line
+            break
+
+    # ── Step 1: structured map (council rates, insurance, strata, etc.) ──────
     for keywords, section, category in INVOICE_CATEGORY_MAP:
         if any(k in text_lower for k in keywords):
             result['section']  = section
             result['category'] = category
             break
+
+    # ── Step 2: keyword fallback when map returned Miscellaneous ─────────────
+    # Run _categorize_by_keywords on vendor name first (most reliable signal),
+    # then on the first 600 chars of document text.
+    if result['category'] == 'Miscellaneous':
+        for probe in (result['vendor'], text[:600]):
+            _sec, _cat = _categorize_by_keywords(probe)
+            if _cat != 'Miscellaneous':
+                result['section']  = _sec
+                result['category'] = _cat
+                break
+
+    # ── Step 3: LLM fallback (Claude Haiku) — only fires if still Miscellaneous
+    # Cost: ~$0.00012/call.  keyword_hint is saved so next identical doc is free.
+    if result['category'] == 'Miscellaneous':
+        _llm_r = _llm_categorise(
+            f"{result['vendor']} {text[:300]}", doc_type='invoice'
+        )
+        if _llm_r:
+            result['section'], result['category'], _kw = _llm_r
+            if _kw:
+                _save_learned_category(
+                    _kw, result['section'], result['category'],
+                    description=result['vendor']
+                )
 
     result['amount'] = _extract_invoice_amount(text)
 
@@ -976,13 +1382,6 @@ def parse_invoice(file_bytes: bytes, filename: str = '') -> dict:
     gm = re.search(r'gst[:\s]+\$?([\d,]+\.?\d*)', text, re.IGNORECASE)
     if gm:
         result['gst'] = _parse_amount(gm.group(1)) or 0.0
-
-    # Vendor / issuer (first line or "from:" pattern)
-    for line in text.splitlines()[:10]:
-        line = line.strip()
-        if line and len(line) > 3 and not line[0].isdigit():
-            result['vendor'] = line
-            break
 
     result['pl_items'] = {result['category']: result['amount']}
     result['extracted_address'] = _extract_address(text)
