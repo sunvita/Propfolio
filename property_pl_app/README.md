@@ -1,36 +1,76 @@
-# Property P&L Portfolio Builder
+# Propfolio — Property Portfolio P&L Builder  v1.0
 
-PDF 업로드 → 자동 파싱 → Excel P&L 생성 (Streamlit 웹앱)
+Upload property PDFs, add manual entries, and generate a fully formatted Excel P&L workbook for each property and your entire portfolio.
 
-## 실행 방법
+---
+
+## Quick Start
 
 ```bash
-# 1. 의존성 설치
 pip install -r requirements.txt
-
-# 2. 앱 실행
 streamlit run app.py
 ```
 
-브라우저에서 `http://localhost:8501` 접속
+Open `http://localhost:8501` in your browser.
 
-## 기능
+---
 
-| 단계 | 내용 |
+## Workflow
+
+| Step | What you do |
 |---|---|
-| Step 1 | 부동산 기본정보 설정 (부동산 수, FY 시작월, 자산정보) |
-| Step 2 | PDF 업로드 (렌탈 명세서 / 은행 거래내역 / 공과금 청구서) |
-| Step 3 | 파싱 결과 검토·수정·수동 입력 |
-| Step 4 | Excel 생성 및 다운로드 |
+| ① Setup | Set number of properties, FY start month, FY range, and property details |
+| ② Upload PDFs | Drop in rental statements, bank records, utility bills, invoices — auto-parsed |
+| ③ Review & Edit | Check editable data tables · Add fixed/recurring expenses via ⚡ Add Entry |
+| ④ Generate Excel | Pick a colour theme · Download workbook + Session JSON |
 
-## 지원 PDF 형식
+**Monthly update:** Load your saved Session JSON in Setup, upload only new PDFs, download updated JSON when done.
 
-- **렌탈/명세서**: Certainty Property 등 관리회사 명세서 (Money In/Out/EFT)
-- **은행 거래내역**: 표 형식의 거래내역 (날짜·내역·금액 자동 추출)
-- **공과금**: 전기·수도·가스·인터넷 청구서 (금액 자동 추출)
+**No JSON?** Use *Restore from Excel* in Setup to rebuild your session from a previously generated workbook.
 
-## Excel 출력 구조
+---
 
-- **부동산별 탭** (IP#1~IP#5): P&L 86칼럼 + KPI 요약 Table A
-- **Summary 탭**: Table B (자산정보·수익률) + Table A (포트폴리오 성과 집계)
-- 컬러 코딩: 파란=수동입력 / 검은=수식 / 초록=탭간참조 / 노란=FY합계 / 회색=템플릿
+## Supported PDF Types
+
+| Type | What's extracted |
+|---|---|
+| Rental / Ownership Statement | Rental income, management fees, net EFT amount, itemised bill expenses |
+| Bank Statement | Transactions auto-categorised into P&L items (mortgage, repairs, insurance, etc.) |
+| Utility Bill | Electricity, water, gas, internet — mapped to the correct utility line |
+| Tax Invoice / Notice | Council rates, land tax, strata levies, building insurance, trade invoices |
+
+---
+
+## ⚡ Add Entry (Step 3)
+
+Add any expense not captured in a PDF — fixed, recurring, or one-off:
+
+- **Toggle off** — single manual entry: one category, one month
+- **Toggle on → Mode A** — same amount each entry (e.g. Internet $89 × 12 months)
+- **Toggle on → Mode B** — total ÷ N entries, split evenly (e.g. Insurance $1,200 ÷ 12)
+- **Interval** — every 1 / 3 / 6 months (quarterly Strata, semi-annual reviews, etc.)
+
+---
+
+## Output Excel
+
+- **Property tabs** — Full P&L with monthly columns (FY-grouped, collapsible), FY & CY totals, KPI table (NOI, Net Profit, DSCR)
+- **Summary tab** — Portfolio asset table (yield, LVR, equity) + performance summary across all properties and periods
+- **3 colour themes** — Navy Professional · Slate & Sage · Charcoal & Amber
+- **Semantic row colours** — 🟢 Income · 🔴 Expenses · 🔵 Net/Profit · 🟣 Cash Flow
+- **Period colours** — Yellow = active FY · Lt. Yellow = active CY · Grey = inactive · Blue = input cell
+
+---
+
+## Address Validation
+
+For every non-bank PDF, the app extracts the property address and compares it to your Setup address:
+
+| Status | Meaning | Default |
+|---|---|---|
+| ✅ Matched | Address confirmed | Included |
+| ⚠️ Partial | Same suburb, verify number/unit | Included |
+| ❌ Mismatch | Different postcode or address | Excluded |
+| ⚪ Not found | No address in PDF | Included |
+
+Override any decision with the **Include in P&L** checkbox in Step 2.

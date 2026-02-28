@@ -680,11 +680,9 @@ if st.session_state.step == 0:
         '<!-- folio -->'
         '<text x="112" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="300" fill="#FFA726" letter-spacing="3">folio</text>'
         '</svg>'
-        '<p style="margin:10px 0 0;opacity:0.85;font-size:17px;">Your Property Portfolio P&amp;L, Simplified.</p>'
+        '<p style="margin:10px 0 0;opacity:0.85;font-size:17px;">Negatively or positively geared — and by how much?</p>'
         '<p style="margin:6px 0 0;opacity:0.75;font-size:15px;">'
-        'Upload your property PDFs — rental statements, bank records, utility bills, and invoices — '
-        'and Propfolio automatically builds a fully formatted P&amp;L report for each property '
-        'and your entire portfolio. No spreadsheets, no manual entry.</p>'
+        'Drop your files. Propfolio knows exactly!</p>'
         '</div>',
         unsafe_allow_html=True
     )
@@ -730,13 +728,13 @@ if st.session_state.step == 0:
             '<b>🆕 First-time setup (4 steps)</b>'
             '</div>', unsafe_allow_html=True)
         st.markdown("""
-① **Setup** — Enter the number of properties, financial year range, and property details (address, purchase price, etc.).
+① **Setup** — Set the number of properties, FY start month, FY range, and property details (address, purchase price, current value, mortgage).
 
-② **Upload PDFs** — Upload documents for each property. The app auto-detects the document type and validates the address. You can include or exclude any file manually.
+② **Upload PDFs** — Drop in documents per property. The app auto-detects type (rental statement, bank, utility, invoice), validates the address, and extracts all figures. Override any include/exclude decision manually.
 
-③ **Review & Edit** — Check the parsed data in editable tables. Add or correct any missing months manually.
+③ **Review & Edit** — Inspect parsed data in editable tables. Use **⚡ Add Entry** to add fixed or recurring expenses not in any PDF — Internet, Insurance, Strata (monthly / quarterly / annual ÷ N), or any one-off item — for one or multiple months with optional interval.
 
-④ **Generate Excel** — Download your formatted portfolio Excel. Also download the **Session JSON** to save your work.
+④ **Generate Excel** — Pick a colour theme, then download your portfolio workbook. Also save the **Session JSON** to carry your data into the next update.
 """)
 
         st.markdown(
@@ -744,15 +742,9 @@ if st.session_state.step == 0:
             '<b>🔄 Monthly update (returning users)</b>'
             '</div>', unsafe_allow_html=True)
         st.markdown("""
-On the **Setup** page, open **"Load previous session"** and upload your saved JSON file.
-Then go straight to **Upload PDFs** and upload only the new month's documents.
+In **Setup**, open **"Load previous session"** and upload your saved JSON. Then go to **Upload PDFs** and drop in only the new month's documents.
 
-The app will automatically:
-- **Add** data for new months
-- **Update** values that have changed in existing months
-- **Keep** unchanged values as-is
-
-After generating, download the updated Session JSON to replace your previous one.
+The app automatically **adds** new months, **updates** changed values, and **keeps** everything else. Download the updated Session JSON when done to replace your previous one.
 """)
 
         st.markdown(
@@ -760,14 +752,7 @@ After generating, download the updated Session JSON to replace your previous one
             '<b>📊 Have an Excel but no Session JSON?</b>'
             '</div>', unsafe_allow_html=True)
         st.markdown("""
-If you generated a Propfolio Excel in a previous session but forgot to download the Session JSON, you can fully restore your data directly from the Excel file.
-
-On the **Setup** page, open **"Restore from Excel"** and upload your workbook. The app reads:
-- All monthly P&L figures from each property tab
-- FY start month and FY range from the column headers
-- Address, purchase price, purchase date, current value, and mortgage from the Summary tab
-
-Once restored, go to **Upload PDFs** to add new months, or **Review & Edit** to check the data first. From that point on, remember to always download the **Session JSON** alongside your Excel.
+In **Setup**, open **"Restore from Excel"** and upload your workbook. The app reads all monthly P&L figures, FY settings from column headers, and property details from the Summary tab. Once restored, proceed to **Upload PDFs** or **Review & Edit** as normal — and remember to download the Session JSON going forward.
 """)
 
     with right:
@@ -810,15 +795,16 @@ Once restored, go to **Upload PDFs** to add new months, or **Review & Edit** to 
             'You can override any decision with the <b>Include in P&amp;L</b> checkbox.</p>'
             '</div>', unsafe_allow_html=True)
 
-        st.markdown("### Output Excel contains")
+        st.markdown("### Output Excel")
         st.markdown(
             '<div style="background:#F8F9FA;border-radius:8px;padding:16px;'
             'font-size:13px;color:#333;">'
-            '• One <b>P&amp;L tab</b> per property<br>'
-            '• Monthly columns (newest → oldest) with FY &amp; CY totals<br>'
-            '• <b>KPI table</b> (NOI, net yield, DSCR) per property<br>'
-            '• <b>Summary tab</b> with portfolio-level dashboard<br>'
-            '• Color-coded: blue = input, black = formula, yellow = FY total'
+            '• One <b>P&amp;L tab</b> per property + <b>Summary</b> dashboard<br>'
+            '• Monthly columns grouped by FY (collapsible) with FY &amp; CY totals<br>'
+            '• <b>KPI table</b> per property (NOI, Net Profit, DSCR, Yield)<br>'
+            '• <b>3 colour themes</b>: Navy Professional · Slate &amp; Sage · Charcoal &amp; Amber<br>'
+            '• Semantic row colours: 🟢 Income · 🔴 Expenses · 🔵 Net · 🟣 Cash Flow<br>'
+            '• Yellow = active FY/CY &nbsp;·&nbsp; Grey = inactive period &nbsp;·&nbsp; Blue = input cell'
             '</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1615,16 +1601,125 @@ elif st.session_state.step == 3:
         'Less: Mortgage Repayment', 'Principal Repaid',
     ]
 
+    # ── Global Add Entry panel ────────────────────────────────────────────────
+    with st.expander("⚡ Add Entry — Fixed, Recurring or Manual", expanded=False):
+        _prop_names = [p['name'] for p in st.session_state.properties]
+        _prop_tabs  = [p['tab']  for p in st.session_state.properties]
+
+        _gc1, _gc2, _gc3 = st.columns([2, 3, 2])
+        _sel_prop_name = _gc1.selectbox(
+            "Property", _prop_names, key="ae_prop"
+        )
+        _sel_prop = st.session_state.properties[_prop_names.index(_sel_prop_name)]
+        _ae_cat = _gc2.selectbox(
+            "Category", PL_ITEMS,
+            index=PL_ITEMS.index('Internet'),
+            key="ae_cat"
+        )
+        _ae_amt = _gc3.number_input(
+            "Amount ($)", min_value=0.0, value=0.0, step=1.0,
+            key="ae_amt"
+        )
+
+        _gd1, _gd2 = st.columns(2)
+        _ae_mo = _gd1.selectbox(
+            "Start Month", list(MONTH_NAMES.keys()),
+            format_func=lambda x: MONTH_NAMES[x],
+            key="ae_mo"
+        )
+        _ae_yr = _gd2.number_input(
+            "Start Year", 2018, 2035, 2025, key="ae_yr"
+        )
+
+        _ae_recurring = st.toggle("🔁 Recurring", key="ae_rec")
+
+        _ae_n        = 1
+        _ae_mode     = 'A'
+        _ae_interval = 1
+        if _ae_recurring:
+            _gr1, _gr2, _gr3 = st.columns([3, 2, 2])
+            _ae_mode_raw = _gr1.radio(
+                "Mode",
+                ["(A) Same amount each entry", "(B) Total ÷ N entries (split evenly)"],
+                key="ae_mode", horizontal=False,
+            )
+            _ae_mode = 'A' if _ae_mode_raw.startswith('(A)') else 'B'
+            _ae_n = _gr2.number_input(
+                "Occurrences", min_value=1, max_value=60, value=12, key="ae_n"
+            )
+            _ae_interval = _gr3.selectbox(
+                "Every",
+                [1, 3, 6],
+                format_func=lambda x: {1: "1 month", 3: "3 months (quarterly)",
+                                        6: "6 months (semi-annual)"}[x],
+                key="ae_interval"
+            )
+
+        # Live preview
+        if _ae_amt > 0:
+            if _ae_recurring:
+                _per_entry = _ae_amt if _ae_mode == 'A' else round(_ae_amt / _ae_n, 2)
+                _total_val = round(_ae_amt * _ae_n, 2) if _ae_mode == 'A' else _ae_amt
+                _interval_label = {1: "monthly", 3: "quarterly", 6: "semi-annual"}[_ae_interval]
+                st.caption(
+                    f"📌 {_ae_n} entries × ${_per_entry:,.2f} ({_interval_label})"
+                    f" = **${_total_val:,.2f} total** → {_sel_prop_name}"
+                )
+            else:
+                st.caption(
+                    f"📌 ${_ae_amt:,.2f} → {MONTH_NAMES[_ae_mo]} {_ae_yr}"
+                    f" · {_ae_cat} · {_sel_prop_name}"
+                )
+
+        if st.button("✚ Apply", key="ae_add", type="primary"):
+            if _ae_amt <= 0:
+                st.warning("Please enter an amount greater than zero.")
+            else:
+                # Build list of (year, month) applying interval between entries
+                _months_list, _yr, _mo = [], _ae_yr, _ae_mo
+                for _ in range(_ae_n if _ae_recurring else 1):
+                    _months_list.append((_yr, _mo))
+                    _mo += _ae_interval
+                    while _mo > 12:
+                        _mo -= 12
+                        _yr += 1
+
+                _n_total = len(_months_list)
+                if _ae_recurring and _ae_mode == 'B':
+                    _pv      = round(_ae_amt / _n_total, 2)
+                    _last_pv = round(_ae_amt - _pv * (_n_total - 1), 2)
+                else:
+                    _pv = _last_pv = _ae_amt
+
+                for _i, (_y, _m) in enumerate(_months_list):
+                    _val = _last_pv if _i == _n_total - 1 else _pv
+                    _sel_prop['data'].setdefault((_y, _m), {})[_ae_cat] = _val
+
+                _m0_lbl = f"{MONTH_NAMES[_months_list[0][1]]} {_months_list[0][0]}"
+                _mz_lbl = f"{MONTH_NAMES[_months_list[-1][1]]} {_months_list[-1][0]}"
+                if _n_total == 1:
+                    st.success(
+                        f"✅ **{_ae_cat}** ${_ae_amt:,.2f} → {_m0_lbl} · {_sel_prop_name}"
+                    )
+                else:
+                    st.success(
+                        f"✅ **{_ae_cat}** × {_n_total} entries"
+                        f" ({_m0_lbl} → {_mz_lbl}) · {_sel_prop_name}"
+                    )
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Per-property data tables (inline editing) ─────────────────────────────
     for prop in st.session_state.properties:
         st.markdown(f"#### 🏠 {prop['name']}")
 
         prop_data = prop['data']
         if not prop_data:
             st.markdown('<div class="warn-box">No data uploaded for this property. '
-                        'You can add data manually below or proceed with a blank template.</div>',
+                        'Use ⚡ Add Entry above or proceed with a blank template.</div>',
                         unsafe_allow_html=True)
 
-        # Build editable table
         all_periods = sorted(prop_data.keys())
 
         if all_periods:
@@ -1639,8 +1734,6 @@ elif st.session_state.step == 3:
                 df = pd.DataFrame(table_data, index=period_cols).T
                 df = df.fillna(0)
 
-                # Auto-size height: show ALL rows without internal truncation.
-                # Row ≈ 35px, header ≈ 38px, 16px buffer; clamp 200–800px.
                 _row_px    = 35
                 _header_px = 38
                 _editor_h  = _header_px + len(df) * _row_px + 16
@@ -1648,7 +1741,7 @@ elif st.session_state.step == 3:
 
                 st.caption(
                     f"📋 {len(df)} line items × {len(period_cols)} periods — "
-                    "scroll left/right to see all months, up/down for all rows"
+                    "edit any cell directly · scroll to see all"
                 )
                 edited = st.data_editor(
                     df,
@@ -1658,169 +1751,10 @@ elif st.session_state.step == 3:
                     num_rows="dynamic",
                 )
 
-                # Write back edits
                 if edited is not None:
                     for item_name, row_vals in edited.iterrows():
                         for period_str, val in zip(all_periods, row_vals):
                             prop_data.setdefault(period_str, {})[str(item_name)] = float(val) if val else 0.0
-
-        # ── Fixed / Recurring Expense entry ──────────────────────────────────
-        with st.expander(f"⚡ Add Fixed / Recurring Expense — {prop['name']}"):
-            st.markdown(
-                '<div class="info-box">💡 Add any expense not captured in a PDF — '
-                'e.g. Internet, Insurance, Council Rates. '
-                'Set a start month and optionally spread it across multiple months.</div>',
-                unsafe_allow_html=True
-            )
-
-            _fe_col1, _fe_col2 = st.columns([2, 1])
-            _fe_cat = _fe_col1.selectbox(
-                "Category", PL_ITEMS,
-                index=PL_ITEMS.index('Internet'),
-                key=f"fe_cat_{prop['tab']}"
-            )
-            _fe_amt = _fe_col2.number_input(
-                "Amount ($)", min_value=0.0, value=0.0, step=1.0,
-                key=f"fe_amt_{prop['tab']}"
-            )
-
-            _fe_col3, _fe_col4 = st.columns(2)
-            _fe_yr = _fe_col3.number_input(
-                "Start Year", 2018, 2035, 2025, key=f"fe_yr_{prop['tab']}"
-            )
-            _fe_mo = _fe_col4.selectbox(
-                "Start Month", list(MONTH_NAMES.keys()),
-                format_func=lambda x: MONTH_NAMES[x],
-                key=f"fe_mo_{prop['tab']}"
-            )
-
-            _fe_recurring = st.toggle(
-                "🔁 Recurring — apply to multiple months",
-                key=f"fe_rec_{prop['tab']}"
-            )
-
-            _fe_n = 1
-            _fe_mode = 'A'
-            if _fe_recurring:
-                _fe_mode_raw = st.radio(
-                    "Recurrence type",
-                    [
-                        "(A)  Same amount each month  (e.g. Internet $89 × 12)",
-                        "(B)  Annual total ÷ N months  (e.g. Insurance $1,200 ÷ 12)",
-                    ],
-                    key=f"fe_mode_{prop['tab']}",
-                    horizontal=False,
-                )
-                _fe_mode = 'A' if _fe_mode_raw.startswith('(A)') else 'B'
-                _fe_n = st.number_input(
-                    "Number of months", min_value=1, max_value=60, value=12,
-                    key=f"fe_n_{prop['tab']}"
-                )
-
-            # Live preview
-            if _fe_amt > 0:
-                if _fe_recurring:
-                    if _fe_mode == 'A':
-                        _per_mo = _fe_amt
-                        _total  = round(_fe_amt * _fe_n, 2)
-                    else:
-                        _per_mo = round(_fe_amt / _fe_n, 2)
-                        _total  = _fe_amt
-                    st.caption(
-                        f"📌 Preview: {_fe_n} months × ${_per_mo:,.2f}/month "
-                        f"= **${_total:,.2f} total**"
-                    )
-                else:
-                    st.caption(
-                        f"📌 Preview: ${_fe_amt:,.2f} → "
-                        f"{MONTH_NAMES[_fe_mo]} {_fe_yr} only"
-                    )
-
-            if st.button("✚ Apply", key=f"fe_add_{prop['tab']}", type="primary"):
-                if _fe_amt <= 0:
-                    st.warning("Please enter an amount greater than zero.")
-                else:
-                    # Build list of (year, month) to fill
-                    _months_list, _yr, _mo = [], _fe_yr, _fe_mo
-                    for _ in range(_fe_n if _fe_recurring else 1):
-                        _months_list.append((_yr, _mo))
-                        _mo += 1
-                        if _mo > 12:
-                            _mo, _yr = 1, _yr + 1
-
-                    # Per-month value
-                    _n_total = len(_months_list)
-                    if _fe_recurring and _fe_mode == 'B':
-                        _pv      = round(_fe_amt / _n_total, 2)
-                        _last_pv = round(_fe_amt - _pv * (_n_total - 1), 2)
-                    else:
-                        _pv = _last_pv = _fe_amt
-
-                    for _i, (_y, _m) in enumerate(_months_list):
-                        _val = _last_pv if _i == _n_total - 1 else _pv
-                        prop['data'].setdefault((_y, _m), {})[_fe_cat] = _val
-
-                    _done_mo = MONTH_NAMES[_months_list[0][1]]
-                    _done_yr = _months_list[0][0]
-                    _last_mo = MONTH_NAMES[_months_list[-1][1]]
-                    _last_yr = _months_list[-1][0]
-                    if _n_total == 1:
-                        st.success(
-                            f"✅ Added **{_fe_cat}** ${_fe_amt:,.2f} "
-                            f"→ {_done_mo} {_done_yr}"
-                        )
-                    else:
-                        st.success(
-                            f"✅ Added **{_fe_cat}** across {_n_total} months "
-                            f"({_done_mo} {_done_yr} → {_last_mo} {_last_yr})"
-                        )
-                    st.rerun()
-
-        # Manual entry for a new month
-        with st.expander(f"➕ Add / edit a month manually for {prop['name']}"):
-            c1, c2 = st.columns(2)
-            m_yr = c1.number_input("Year", 2020, 2035, 2025, key=f"myr_{prop['tab']}")
-            m_mo = c2.selectbox("Month", list(MONTH_NAMES.keys()),
-                                format_func=lambda x: MONTH_NAMES[x],
-                                key=f"mmo_{prop['tab']}")
-            st.markdown("**Income**")
-            ri  = st.number_input("Rental Income",      0.0, key=f"ri_{prop['tab']}")
-            oi  = st.number_input("Other Income",       0.0, key=f"oi_{prop['tab']}")
-            eb  = st.number_input("Excess Bill Shares", 0.0, key=f"eb_{prop['tab']}")
-            st.markdown("**Operating Expenses**")
-            mf  = st.number_input("Management Fees",      0.0, key=f"mf_{prop['tab']}")
-            lf  = st.number_input("Letting Fees",         0.0, key=f"lf_{prop['tab']}")
-            cr  = st.number_input("Council Rates",        0.0, key=f"cr_{prop['tab']}")
-            lt  = st.number_input("Land Tax",             0.0, key=f"lt_{prop['tab']}")
-            sc  = st.number_input("Strata / Body Corp",   0.0, key=f"sc_{prop['tab']}")
-            bi  = st.number_input("Building Insurance",   0.0, key=f"bi_{prop['tab']}")
-            mr  = st.number_input("Maintenance & Repairs",0.0, key=f"mr_{prop['tab']}")
-            st.markdown("**Utilities**")
-            el  = st.number_input("Electricity",        0.0, key=f"el_{prop['tab']}")
-            wa  = st.number_input("Water",              0.0, key=f"wa_{prop['tab']}")
-            ga  = st.number_input("Gas",                0.0, key=f"ga_{prop['tab']}")
-            inet= st.number_input("Internet",           0.0, key=f"in_{prop['tab']}")
-            st.markdown("**Financing**")
-            mi  = st.number_input("Mortgage Interest",  0.0, key=f"mi_{prop['tab']}")
-            prin= st.number_input("Principal Repaid",   0.0, key=f"pr_{prop['tab']}")
-
-            if st.button(f"Add {MONTH_NAMES[m_mo]} {m_yr}", key=f"add_{prop['tab']}"):
-                key = (m_yr, m_mo)
-                prop['data'].setdefault(key, {})
-                for label, val in [
-                    ('Rental Income', ri), ('Other Income', oi),
-                    ('Excess Bill Shares', eb), ('Management Fees', mf),
-                    ('Letting Fees', lf), ('Council Rates', cr), ('Land Tax', lt),
-                    ('Strata / Body Corporate', sc), ('Building Insurance', bi),
-                    ('Maintenance & Repairs', mr),
-                    ('Electricity', el), ('Water', wa),
-                    ('Gas', ga), ('Internet', inet),
-                    ('Mortgage Interest', mi), ('Principal Repaid', prin),
-                ]:
-                    if val:
-                        prop['data'][key][label] = val
-                st.success(f"Added data for {MONTH_NAMES[m_mo]} {m_yr}")
-                st.rerun()
 
         st.markdown("---")
 
