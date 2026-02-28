@@ -1137,32 +1137,64 @@ elif st.session_state.step == 2:
                             use_container_width=True
                         )
 
-                    # ── Expense line items ──────────────────────────────────
-                    _expenses = {
-                        k: v for k, v in result.get('pl_items', {}).items()
-                        if k not in ('Rental Income', 'Management Fees') and v > 0
-                    }
-                    if _expenses:
+                    # ── Expense breakdown ──────────────────────────────────
+                    # Show ALL expenses: management fees + itemised bills grouped by category.
+                    # money_out (v11) = total of all expenses, so P&L is simply
+                    # money_in − money_out = eft with no double-counting.
+                    _pl          = result.get('pl_items', {})
+                    _bill_items  = result.get('bill_items', [])
+                    _mgmt_fees   = _pl.get('Management Fees', result.get('money_out', 0))
+                    _money_in    = result.get('money_in', 0)
+                    _money_out   = result.get('money_out', 0)
+                    _eft         = result.get('eft', 0)
+
+                    # Build expense rows: mgmt fee first, then bill items grouped by category
+                    _exp_rows = []
+                    if _mgmt_fees > 0:
+                        _exp_rows.append({
+                            'Category': 'Management Fees',
+                            'Description': 'Agency management & letting fees',
+                            'Amount': f"${_mgmt_fees:,.2f}",
+                        })
+
+                    if _bill_items:
+                        # Group individual items by category, sort categories alphabetically
+                        from collections import defaultdict as _dd
+                        _by_cat: dict = _dd(list)
+                        for _b in _bill_items:
+                            _by_cat[_b.get('category', 'Miscellaneous')].append(_b)
+                        for _cat in sorted(_by_cat):
+                            for _item in _by_cat[_cat]:
+                                _exp_rows.append({
+                                    'Category':    _cat,
+                                    'Description': _item.get('description', ''),
+                                    'Amount':      f"${_item.get('amount', 0):,.2f}",
+                                })
+                    else:
+                        # Fallback: category totals only (no itemised bill data)
+                        for _cat, _amt in sorted(_pl.items()):
+                            if _cat not in ('Rental Income', 'Management Fees') and _amt > 0:
+                                _exp_rows.append({
+                                    'Category':    _cat,
+                                    'Description': '—',
+                                    'Amount':      f"${_amt:,.2f}",
+                                })
+
+                    if _exp_rows:
                         st.markdown("**Expenses**")
-                        _exp_rows = [{'Category': k, 'Amount': f"${v:,.2f}"}
-                                     for k, v in sorted(_expenses.items())]
-                        st.dataframe(pd.DataFrame(_exp_rows), use_container_width=True,
-                                     hide_index=True)
+                        st.dataframe(pd.DataFrame(_exp_rows),
+                                     use_container_width=True, hide_index=True)
 
                     # ── P&L reconciliation summary ──────────────────────────
-                    _money_in  = result.get('money_in', 0)
-                    _money_out = result.get('money_out', 0)
-                    _eft       = result.get('eft', 0)
-                    _exp_total = sum(_expenses.values())
-                    _calc_net  = round(_money_in - _money_out - _exp_total, 2)
-                    _match     = abs(_calc_net - _eft) < 0.02
+                    # money_out already = total expenses (mgmt + bills) — no separate exp_total
+                    _calc_net = round(_money_in - _money_out, 2)
+                    _match    = abs(_calc_net - _eft) < 0.02
                     st.markdown(
                         f"<div style='background:{'#E8F5E9' if _match else '#FFF3E0'};"
                         f"border-left:4px solid {'#388E3C' if _match else '#F57C00'};"
                         f"padding:8px 12px;border-radius:4px;margin-top:6px;font-size:14px;'>"
                         f"<b>P&amp;L check:</b> &nbsp;"
-                        f"${_money_in:,.2f} income &minus; ${_money_out:,.2f} mgmt"
-                        + (f" &minus; ${_exp_total:,.2f} expenses" if _exp_total else "")
+                        f"${_money_in:,.2f} income &minus; ${_money_out:,.2f} total expenses"
                         + f" = <b>${_calc_net:,.2f}</b> &nbsp;"
                         + (f"✅ matches EFT ${_eft:,.2f}" if _match
                            else f"⚠️ expected EFT ${_eft:,.2f}")

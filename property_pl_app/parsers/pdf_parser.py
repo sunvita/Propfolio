@@ -5,7 +5,7 @@ PDF parsers for property P&L:
   3. Utility bills  (electricity, water, gas, internet)
   4. Invoices / Notices  (council rates, land tax, strata, insurance, trades, etc.)
 
-Parser version: 2026-02-28-v8
+Parser version: 2026-02-28-v12
 """
 
 import re
@@ -178,23 +178,63 @@ BANK_CATEGORIES = {
     'mulching':             ('opex',      'Cleaning'),
     'irrigation':           ('opex',      'Cleaning'),
     'turf':                 ('opex',      'Cleaning'),
+    # ── OpEx — Council Rates ──────────────────────────────────────────────────
     'council rates':        ('opex',      'Council Rates'),
     'municipal rates':      ('opex',      'Council Rates'),
     'rates notice':         ('opex',      'Council Rates'),
+    'shire rates':          ('opex',      'Council Rates'),
+    'local council':        ('opex',      'Council Rates'),
+    'rate notice':          ('opex',      'Council Rates'),
+    'city of ':             ('opex',      'Council Rates'),
+    'town of ':             ('opex',      'Council Rates'),
+    'shire of ':            ('opex',      'Council Rates'),
+
+    # ── OpEx — Land Tax ───────────────────────────────────────────────────────
     'land tax':             ('opex',      'Land Tax'),
     'state revenue':        ('opex',      'Land Tax'),
     'revenue nsw':          ('opex',      'Land Tax'),
+    'revenue victoria':     ('opex',      'Land Tax'),
+    'revenue wa':           ('opex',      'Land Tax'),
     'osr ':                 ('opex',      'Land Tax'),
+    'sro ':                 ('opex',      'Land Tax'),   # State Revenue Office VIC
+    'land tax assessment':  ('opex',      'Land Tax'),
+    'land tax notice':      ('opex',      'Land Tax'),
+    'department of finance':('opex',      'Land Tax'),
+
+    # ── OpEx — Strata / Body Corporate ───────────────────────────────────────
     'strata levy':          ('opex',      'Strata / Body Corporate'),
+    'strata fee':           ('opex',      'Strata / Body Corporate'),
     'body corporate':       ('opex',      'Strata / Body Corporate'),
     'owners corporation':   ('opex',      'Strata / Body Corporate'),
+    'owners corp':          ('opex',      'Strata / Body Corporate'),
+    'oc levy':              ('opex',      'Strata / Body Corporate'),
     'strata management':    ('opex',      'Strata / Body Corporate'),
+    'building levy':        ('opex',      'Strata / Body Corporate'),
+
+    # ── OpEx — Building Insurance ─────────────────────────────────────────────
     'building insurance':   ('opex',      'Building Insurance'),
     'landlord insurance':   ('opex',      'Building Insurance'),
     'property insurance':   ('opex',      'Building Insurance'),
     'insurance premium':    ('opex',      'Building Insurance'),
+    'home insurance':       ('opex',      'Building Insurance'),
+    'rental insurance':     ('opex',      'Building Insurance'),
+
+    # ── OpEx — Management / Inspection ────────────────────────────────────────
+    'inspection fee':       ('opex',      'Management Fees'),
+    'condition report fee': ('opex',      'Management Fees'),
+    'routine inspection':   ('opex',      'Management Fees'),
+    'entry condition':      ('opex',      'Management Fees'),
+    'tribunal fee':         ('opex',      'Management Fees'),
+    'vcat ':                ('opex',      'Management Fees'),
+    'ncat ':                ('opex',      'Management Fees'),
+    'wat ':                 ('opex',      'Management Fees'),  # WA Tribunal
+
+    # ── OpEx — Advertising ────────────────────────────────────────────────────
     'advertising':          ('opex',      'Advertising'),
     'photography':          ('opex',      'Advertising'),
+    'realestate.com':       ('opex',      'Advertising'),
+    'domain.com':           ('opex',      'Advertising'),
+    'listing fee':          ('opex',      'Advertising'),
 
     # ── Utilities ─────────────────────────────────────────────────────────────
     'electricity':          ('utilities', 'Electricity'),
@@ -549,12 +589,79 @@ def _get_api_key() -> str:
 import json as _json
 import pathlib as _pathlib
 
-_LEARNED_FILE = _pathlib.Path(__file__).parent / 'learned_categories.json'
-_LOG_FILE     = _pathlib.Path(__file__).parent / 'category_learning_log.csv'
+_LEARNED_FILE       = _pathlib.Path(__file__).parent / 'learned_categories.json'
+_LOG_FILE           = _pathlib.Path(__file__).parent / 'category_learning_log.csv'
+_LEARNED_REGEX_FILE = _pathlib.Path(__file__).parent / 'learned_regex_rules.json'
 
 # In-memory cache: keyword → (section, category)
 # Populated once at module load; updated live when new rules are saved.
 _learned_cache: dict = {}
+
+# In-memory cache: field → [{pattern, format_name, example}]
+# Learned regex patterns for rental statement field extraction.
+# Applied as "Tier 0" before static patterns in the non-Ailo branch.
+_learned_regex_rules: dict = {}
+
+
+def _load_learned_regex_rules() -> dict:
+    """Load per-field regex rules saved by the LLM rental extraction fallback."""
+    try:
+        if _LEARNED_REGEX_FILE.exists():
+            data = _json.loads(_LEARNED_REGEX_FILE.read_text())
+            rules: dict = {}
+            for item in data:
+                if isinstance(item, dict) and 'field' in item and 'pattern' in item:
+                    rules.setdefault(item['field'], []).append(item)
+            return rules
+    except Exception:
+        pass
+    return {}
+
+
+def _save_learned_regex_rule(field: str, pattern: str,
+                              format_name: str = '', example: str = '') -> None:
+    """
+    Persist a new per-field regex pattern extracted by the LLM.
+    Updates in-memory cache immediately and auto-commits to GitHub.
+    """
+    import datetime
+    global _learned_regex_rules
+
+    if not field or not pattern or len(pattern) < 5:
+        return
+
+    # Validate the pattern compiles
+    try:
+        re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return   # skip malformed patterns
+
+    # Update live cache
+    new_entry = {
+        'field': field, 'pattern': pattern,
+        'format_name': format_name, 'example': example[:120],
+        'added': datetime.datetime.now().isoformat(),
+    }
+    _learned_regex_rules.setdefault(field, []).append(new_entry)
+
+    # Write to JSON (skip duplicates based on field+pattern)
+    updated_list: list = []
+    try:
+        existing: list = []
+        if _LEARNED_REGEX_FILE.exists():
+            existing = _json.loads(_LEARNED_REGEX_FILE.read_text())
+        known = {(i.get('field', ''), i.get('pattern', '')) for i in existing if isinstance(i, dict)}
+        if (field, pattern) not in known:
+            existing.append(new_entry)
+            _LEARNED_REGEX_FILE.write_text(_json.dumps(existing, indent=2))
+            updated_list = existing
+    except Exception:
+        pass
+
+    # Auto-commit to GitHub
+    if updated_list:
+        _push_to_github(updated_list, f'{field}:{pattern[:30]}',
+                        github_path_override='property_pl_app/parsers/learned_regex_rules.json')
 
 
 def _load_learned_categories() -> dict:
@@ -624,9 +731,12 @@ def _save_learned_category(keyword: str, section: str, category: str,
         pass
 
 
-def _push_to_github(content: list, new_keyword: str = '') -> None:
+def _push_to_github(content: list, new_keyword: str = '',
+                     github_path_override: str = '') -> None:
     """
-    Auto-commit learned_categories.json back to the GitHub repo.
+    Auto-commit a JSON file back to the GitHub repo.
+    Defaults to GITHUB_FILE_PATH (learned_categories.json).
+    Pass github_path_override to commit a different file (e.g. learned_regex_rules.json).
     Requires GITHUB_TOKEN and GITHUB_REPO in Streamlit secrets (or env).
     Silently skips if secrets are absent — no error surfaced to the user.
     """
@@ -634,7 +744,7 @@ def _push_to_github(content: list, new_keyword: str = '') -> None:
 
     token = _get_secret('GITHUB_TOKEN')
     repo  = _get_secret('GITHUB_REPO')           # e.g. sunvita/Propfolio
-    fpath = _get_secret('GITHUB_FILE_PATH')       # e.g. property_pl_app/parsers/learned_categories.json
+    fpath = github_path_override or _get_secret('GITHUB_FILE_PATH')
     if not (token and repo and fpath):
         return
 
@@ -684,21 +794,37 @@ def _llm_categorise(description: str, doc_type: str = 'invoice') -> tuple | None
     valid_categories = [
         'Rental Income', 'Management Fees', 'Letting Fees',
         'Maintenance & Repairs', 'Cleaning', 'Council Rates', 'Land Tax',
-        'Strata', 'Insurance', 'Advertising',
+        'Strata / Body Corporate', 'Building Insurance', 'Advertising',
         'Electricity', 'Water', 'Gas', 'Internet',
         'Financing', 'Miscellaneous',
     ]
+
+    # Rich examples help the LLM pick the right category on first call
+    category_guidance = (
+        "Category guidance (Australian context):\n"
+        "  Council Rates    — council/shire/municipal rates notice, local government charge\n"
+        "  Land Tax         — state land tax assessment (Revenue NSW, SRO VIC, Revenue WA, OSR QLD)\n"
+        "  Strata / Body Corporate — strata levy, OC levy, body corporate fee, building levy\n"
+        "  Building Insurance — landlord/building/home/rental insurance policy or premium\n"
+        "  Management Fees  — property management fee, inspection fee, routine/entry condition report\n"
+        "  Letting Fees     — lease renewal, tenant placement, advertising/listing fee\n"
+        "  Maintenance & Repairs — trade work: plumber, electrician, locksmith, pest control, etc.\n"
+        "  Cleaning         — cleaning, bond/exit clean, gardening, lawn mowing\n"
+        "  Financing        — mortgage payment, loan interest, bank fee\n"
+        "  Electricity/Water/Gas/Internet — utility bills\n"
+    )
 
     prompt = (
         "Categorise this Australian rental property expense for a landlord P&L.\n"
         f"Document type: {doc_type}\n"
         f"Description: {description[:300]}\n\n"
         f"Valid categories: {', '.join(valid_categories)}\n\n"
-        "Return ONLY a JSON object (no markdown) with:\n"
+        + category_guidance +
+        "\nReturn ONLY a JSON object (no markdown) with:\n"
         "  section   – 'income', 'opex', or 'utilities'\n"
-        "  category  – one of the valid categories\n"
+        "  category  – one of the valid categories above\n"
         "  keyword   – the 1–4 word phrase from the description that best\n"
-        "              identifies the category (e.g. 'roof repair', NOT 'repair')\n"
+        "              identifies the category (e.g. 'strata levy', 'land tax')\n"
     )
 
     try:
@@ -721,8 +847,9 @@ def _llm_categorise(description: str, doc_type: str = 'invoice') -> tuple | None
         return None
 
 
-# Populate the learned cache at module startup
-_learned_cache = _load_learned_categories()
+# Populate caches at module startup (runs once; cost-free)
+_learned_cache       = _load_learned_categories()
+_learned_regex_rules = _load_learned_regex_rules()
 
 
 def _llm_extract_rental(text: str) -> dict:
@@ -731,7 +858,12 @@ def _llm_extract_rental(text: str) -> dict:
     Only called when both regex and table extraction return no figures.
     Requires ANTHROPIC_API_KEY as an environment variable or Streamlit secret.
     Returns a partial dict or {} on any error (silent degradation).
-    Cost: ~$0.0004 per call (negligible).
+    Cost: ~$0.0006 per call (values + regex hints).
+
+    Self-learning: when the LLM successfully extracts values it also returns
+    short regex patterns for each field.  These are saved to
+    learned_regex_rules.json and applied on every subsequent parse as "Tier 0"
+    — so the same statement format never hits the API twice.
     """
     api_key = _get_api_key()
     if not api_key:
@@ -745,25 +877,31 @@ def _llm_extract_rental(text: str) -> dict:
     try:
         client = anthropic.Anthropic(api_key=api_key)
         prompt = (
-            "Extract the following fields from this rental/ownership statement.\n"
-            "Return ONLY a JSON object — no explanation, no markdown fences.\n"
-            "Keys:\n"
-            "  money_in  – total rental income received (number)\n"
-            "  money_out – total management/agency fees charged (number)\n"
-            "  eft       – net amount disbursed/transferred to the owner (number)\n"
-            "  year      – statement year (integer)\n"
-            "  month     – statement month, 1–12 (integer)\n"
-            "  address   – rental property street address (string)\n"
-            "Use null for any field you cannot confidently identify.\n\n"
-            f"Statement text:\n{text[:3000]}"
+            "Extract financial fields from this Australian rental/ownership statement.\n"
+            "Return ONLY a JSON object — no explanation, no markdown.\n\n"
+            "Required keys:\n"
+            "  money_in   – total rental income received (number, e.g. 3080.00)\n"
+            "  money_out  – total management/agency fees charged (number)\n"
+            "  eft        – net amount disbursed to the owner (number)\n"
+            "  year       – statement year (integer, e.g. 2025)\n"
+            "  month      – statement month 1–12 (integer, e.g. 7 for July)\n"
+            "  address    – rental property street address (string)\n"
+            "  format_name – software/agency name (e.g. 'Console Australia', 'Certainty')\n\n"
+            "Also return a 'patterns' object mapping each found numeric field to the\n"
+            "SHORT Python regex pattern (≤70 chars, use \\$ for dollar sign) that\n"
+            "identifies its value in this statement, with ONE capture group for the\n"
+            "amount digits.  Example:\n"
+            "  { \"money_in\": \"total income[:\\\\s]+\\\\$([\\\\d,]+\\\\.?\\\\d*)\",\n"
+            "    \"eft\": \"total payments[^=]{0,300}=\\\\s+\\\\$([\\\\d,]+\\\\.?\\\\d*)\" }\n\n"
+            "Use null for any field you cannot identify.\n\n"
+            f"Statement text (first 3500 chars):\n{text[:3500]}"
         )
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        # Strip any accidental markdown code fences
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
 
         import json
@@ -786,6 +924,24 @@ def _llm_extract_rental(text: str) -> dict:
                     pass
         if data.get('address'):
             result['address'] = str(data['address'])
+
+        # ── Self-learning: save regex patterns returned by the LLM ─────────────
+        _fmt = str(data.get('format_name', '')).strip()
+        _patterns = data.get('patterns', {})
+        if isinstance(_patterns, dict):
+            for _field, _pat in _patterns.items():
+                if _field in ('money_in', 'money_out', 'eft') and isinstance(_pat, str) and _pat:
+                    # Find example text matching this pattern (for annotation)
+                    try:
+                        _ex_m = re.search(_pat, text[:3500], re.IGNORECASE)
+                        _example = _ex_m.group() if _ex_m else ''
+                    except Exception:
+                        _example = ''
+                    _save_learned_regex_rule(
+                        field=_field, pattern=_pat,
+                        format_name=_fmt, example=_example,
+                    )
+
         return result
 
     except Exception:
@@ -807,7 +963,12 @@ def _parse_amount(s) -> float | None:
 def _detect_year_month(text: str) -> tuple[int, int] | None:
     """Try to pull a statement month/year from text."""
     patterns = [
-        # High-priority labeled dates (rate notices, invoices)
+        # ── Highest priority: explicitly labelled period dates ──────────────────
+        # "Period 01.01.2026 - 31.01.2026"  (O'Halloran Circuit / dot-format)  →  day.month.year
+        r'period\s+(\d{2})\.(\d{2})\.(\d{4})\s*[-–—]',
+        # "STATEMENT PERIOD 14/07/2025 - 21/07/2025" (Certainty / PropertyTree)  → day/month/year
+        r'statement\s+period\s+\d{1,2}/(\d{2})/(\d{4})',
+        # ── Standard labeled dates (invoices, notices) ─────────────────────────
         r'issue\s*date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'date\s+of\s+issue[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'date\s+of\s+payment[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
@@ -815,10 +976,11 @@ def _detect_year_month(text: str) -> tuple[int, int] | None:
         r'tax\s+invoice[^:]*:\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'billing\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
         r'statement\s+date[:\s]+(\d{1,2})[/.](\d{1,2})[/.](\d{4})',
-        # General patterns
+        # ── General patterns ───────────────────────────────────────────────────
         r'(january|february|march|april|may|june|july|august|'
         r'september|october|november|december)\s+(\d{4})',
-        r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[- ](\d{2,4})',
+        # Require 4-digit year to avoid "Feb 25" (history table rows) matching as Feb 2025
+        r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[- ](\d{4})\b',
         r'(\d{1,2})[/-](\d{4})\b',
         r'period[:\s]+\d{1,2}[/-]\d{1,2}[/-](\d{4})',
         r'\b(\d{1,2})\s+(january|february|march|april|may|june|july|august|'
@@ -919,38 +1081,42 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
     }
 
     # ── Date detection ──────────────────────────────────────────────────────
-    # Priority 1: Ailo/platform "Ownership statement [Month] [Year]"
-    _own_m = re.search(
-        r'ownership\s+statement\s+'
+    _MONTHS_PAT = (
         r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
         r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|'
-        r'nov(?:ember)?|dec(?:ember)?)\s+(\d{4})',
-        text, re.IGNORECASE
+        r'nov(?:ember)?|dec(?:ember)?)\s+(\d{4})'
     )
+    # Priority 1: "Ownership statement Mar 2025" (old Ailo layout — month on same line)
+    _own_m = re.search(r'ownership\s+statement\s+' + _MONTHS_PAT, text, re.IGNORECASE)
     if _own_m:
         _month = MONTH_MAP.get(_own_m.group(1).lower()[:3])
         _year  = int(_own_m.group(2))
         if _month:
             result['year'], result['month'] = _year, _month
     else:
-        # Priority 2: "Statement period  1 [Month] [Year] — 30 [Month] [Year]"
-        # Use the END date of the period (closing month)
-        _period_m = re.search(
-            r'statement\s+period[:\s]*\d{1,2}\s+\w+\s+\d{4}\s*[—\-–]+\s*\d{1,2}\s+'
-            r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
-            r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|'
-            r'nov(?:ember)?|dec(?:ember)?)\s+(\d{4})',
-            text, re.IGNORECASE
-        )
-        if _period_m:
-            _month = MONTH_MAP.get(_period_m.group(1).lower()[:3])
-            _year  = int(_period_m.group(2))
+        # Priority 2: "Statement period Jan 2026" (new Ailo layout — month/year only, no range)
+        _sp_m = re.search(r'statement\s+period\s+' + _MONTHS_PAT, text, re.IGNORECASE)
+        if _sp_m:
+            _month = MONTH_MAP.get(_sp_m.group(1).lower()[:3])
+            _year  = int(_sp_m.group(2))
             if _month:
                 result['year'], result['month'] = _year, _month
         else:
-            ym = _detect_year_month(text)
-            if ym:
-                result['year'], result['month'] = ym
+            # Priority 3: "Statement period  1 [Month] [Year] — 30 [Month] [Year]"
+            _period_m = re.search(
+                r'statement\s+period[:\s]*\d{1,2}\s+\w+\s+\d{4}\s*[—\-–]+\s*\d{1,2}\s+'
+                + _MONTHS_PAT,
+                text, re.IGNORECASE
+            )
+            if _period_m:
+                _month = MONTH_MAP.get(_period_m.group(1).lower()[:3])
+                _year  = int(_period_m.group(2))
+                if _month:
+                    result['year'], result['month'] = _year, _month
+            else:
+                ym = _detect_year_month(text)
+                if ym:
+                    result['year'], result['month'] = ym
 
     # ── Address detection ────────────────────────────────────────────────────
     # Priority 1 (Ailo): extract property address from "Room N, [address] Net income:"
@@ -961,8 +1127,16 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         result['extracted_address'] = _extract_address(text)
 
     # ── Financial figures ────────────────────────────────────────────────────
-    # Detect Ailo platform format ("Ownership statement" header present)
-    _is_ailo = bool(re.search(r'ownership\s+statement\s+\w+\s+\d{4}', text, re.IGNORECASE))
+    # Detect Ailo platform format.
+    # Old layout: "Ownership statement Mar 2025" (month+year on same line)
+    # New layout: "Ownership statement" alone + "Statement period Jan 2026" elsewhere
+    _is_ailo = bool(
+        re.search(r'ownership\s+statement\s+\w+\s+\d{4}', text, re.IGNORECASE)
+        or (
+            re.search(r'\bownership\s+statement\b', text, re.IGNORECASE)
+            and re.search(r'\bstatement\s+period\s+\w+\s+\d{4}\b', text, re.IGNORECASE)
+        )
+    )
 
     if _is_ailo:
         # money_in: "Income   $780.00  $0.00  $780.00"  → first $ value (In column)
@@ -976,13 +1150,15 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         if _m:
             result['money_out'] = _parse_amount(_m.group(1)) or 0.0
 
-        # eft: sum of all per-room "Net income: $X" values
-        # This equals money_in minus ALL expenses (fees + bills) = true net to owner
-        _net_vals = re.findall(r'Net income:\s+\$([\d,]+\.?\d*)', text, re.IGNORECASE)
+        # eft — sum of per-room "Net income:" is always the authoritative current-period
+        # net.  "Transferred to investors" in the Overview can represent a PRIOR month's
+        # accumulated balance being paid out and must NOT be used as this period's EFT.
+        # 1. Sum per-room Net incomes (includes negative rooms like repair-only rooms)
+        _net_vals = re.findall(r'Net income:\s+(-?\$[\d,]+\.?\d*)', text, re.IGNORECASE)
         if _net_vals:
             result['eft'] = round(sum(_parse_amount(v) or 0.0 for v in _net_vals), 2)
         elif result['money_in'] > 0:
-            # Fallback: Income_in minus Expenses_out column
+            # 2. Fallback: Income_in minus Expenses_out column (Overview row)
             _exp_m = re.search(
                 r'^\s*Expenses\s+\$[\d,]+\.?\d*\s+\$([\d,]+\.?\d*)',
                 text, re.IGNORECASE | re.MULTILINE
@@ -992,55 +1168,101 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
                 result['eft'] = round(result['money_in'] - _exp_out, 2)
 
     else:
-        # Generic patterns for other management platforms
-        # (e.g. "Money In / Money Out / You Received / EFT to owner")
+        # Generic patterns for other management platforms.
+        # Covers PropertyMe / O'Halloran Circuit / Console (NAS agency) / Certainty (PropertyTree) / and learned patterns.
+
+        # ── Step 1: apply any LLM-learned regex rules first ────────────────────
+        for _rule in _learned_regex_rules.get('money_in', []):
+            if result['money_in'] == 0.0:
+                _m = re.search(_rule['pattern'], text, re.IGNORECASE | re.MULTILINE)
+                if _m:
+                    result['money_in'] = _parse_amount(_m.group(1)) or 0.0
+        for _rule in _learned_regex_rules.get('money_out', []):
+            if result['money_out'] == 0.0:
+                _m = re.search(_rule['pattern'], text, re.IGNORECASE | re.MULTILINE)
+                if _m:
+                    result['money_out'] = _parse_amount(_m.group(1)) or 0.0
+        for _rule in _learned_regex_rules.get('eft', []):
+            if result['eft'] == 0.0:
+                _m = re.search(_rule['pattern'], text, re.IGNORECASE | re.MULTILINE)
+                if _m:
+                    result['eft'] = _parse_amount(_m.group(1)) or 0.0
+
+        # ── Step 2: static patterns (all known formats) ────────────────────────
         for _label, _key in [
-            (r'money\s+in[:\s]+\$?([\d,]+\.?\d*)',                     'money_in'),
-            (r'money\s+out[:\s]+\$?([\d,]+\.?\d*)',                    'money_out'),
-            (r'you\s+received[:\s]+\$?([\d,]+\.?\d*)',                 'eft'),
-            (r'withdrawal\s+by\s+eft[^$\n]{0,60}\$?([\d,]+\.?\d*)',   'eft'),
-            (r'eft\s+to\s+owner[^$\n]{0,30}\$?([\d,]+\.?\d*)',        'eft'),
-            (r'eft[^$\d\n]{0,20}\$?([\d,]+\.?\d*)',                    'eft'),
-            (r'net\s+amount[:\s]+\$?([\d,]+\.?\d*)',                   'eft'),
-            (r'disbursement\s+to\s+owner[:\s]+\$?([\d,]+\.?\d*)',     'eft'),
+            # PropertyMe / O'Halloran Circuit — use [ \t:]+ to prevent crossing newlines
+            # (Certainty/PropertyTree uses "MONEY IN" as a column header with amounts on next line)
+            (r'money\s+in[ \t:]+\$?([\d,]+\.?\d*)',                   'money_in'),
+            (r'money\s+out[ \t:]+\$?([\d,]+\.?\d*)',                  'money_out'),
+            (r'you\s+received[ \t:]+\$?([\d,]+\.?\d*)',               'eft'),
+            # Console Australia (used by NAS agency)
+            (r'total\s+income[:\s]+\$([\d,]+\.?\d*)',                 'money_in'),
+            (r'total\s+expenses[:\s]+\$([\d,]+\.?\d*)',               'money_out'),
+            # "Total payments: Balance…income…expenses = $2,831.92"
+            (r'total\s+payments[^=\n]{0,300}=\s+\$([\d,]+\.?\d*)',   'eft'),
+            # Certainty / PropertyTree
+            (r'total\s+ownership\s+payments\s+\$([\d,]+\.?\d*)',      'eft'),
+            (r'ownership\s+payment[:\s]+\$([\d,]+\.?\d*)',            'eft'),
+            # Generic EFT labels (Harcourts / others)
+            (r'withdrawal\s+by\s+eft[^$\n]{0,60}\$?([\d,]+\.?\d*)',  'eft'),
+            (r'eft\s+to\s+account[^$\n]{0,60}\$?([\d,]+\.?\d*)',     'eft'),
+            (r'eft\s+to\s+owner[^$\n]{0,30}\$?([\d,]+\.?\d*)',       'eft'),
+            (r'eft[^$\d\n]{0,20}\$?([\d,]+\.?\d*)',                   'eft'),
+            (r'net\s+amount[:\s]+\$?([\d,]+\.?\d*)',                  'eft'),
+            (r'disbursement\s+to\s+owner[:\s]+\$?([\d,]+\.?\d*)',    'eft'),
         ]:
-            _m = re.search(_label, text, re.IGNORECASE)
+            _m = re.search(_label, text, re.IGNORECASE | re.MULTILINE)
             if _m:
                 _val = _parse_amount(_m.group(1))
                 if _val is not None and (result[_key] == 0.0 or _key == 'eft'):
                     result[_key] = _val
 
     # ── Ailo itemised bill extraction ────────────────────────────────────────
-    # Extract individual expense lines ("Category · description $amount") so
-    # each bill appears as its own P&L line item.
-    # Structure:  Income → Mgmt Fees → [bill items by category] → Net = Transfer
+    # Extract individual expense lines ("Category · description $amount") and
+    # store each as a separate entry in result['bill_items'] so the UI can
+    # show the full breakdown (not just category totals).
     if _is_ailo:
         _BILL_SKIP = re.compile(
             r'^(rent\s+payment|management\s+fees?|paid\s+on|contributions?|'
             r'failed|transfer\s+to|withdrawal|total|gst|overview|income|expenses)',
             re.IGNORECASE
         )
-        # Match:  "[Category] · [details...] $amount" on a single line
+        # Match:  "[Category] · [description...] $amount"  on a single line
+        # group 1 = category label, group 2 = description, group 3 = amount
         _bill_pattern = re.compile(
-            r'^([A-Za-z][^\n·]{1,80}?)\s+·\s+[^\n$]*\$([\d,]+\.?\d*)\s*$',
+            r'^([A-Za-z][^\n·]{1,60}?)\s+·\s+([^\n$]{1,120}?)\s*\$([\d,]+\.?\d*)\s*$',
             re.MULTILINE
         )
         _bill_totals: dict[str, float] = {}
+        _bill_items: list = []
         for _bm in _bill_pattern.finditer(text):
-            _cat_text = _bm.group(1).strip()
-            _amt      = _parse_amount(_bm.group(2)) or 0.0
+            _cat_text  = _bm.group(1).strip()
+            _desc_text = _bm.group(2).strip().rstrip('·').strip()
+            _amt       = _parse_amount(_bm.group(3)) or 0.0
             if _amt <= 0 or _BILL_SKIP.match(_cat_text):
                 continue
             _section, _pl_cat = _categorize_by_keywords(_cat_text)
-            # Only capture opex/utilities — skip income-side matches
-            if _section in ('opex', 'utilities'):
-                _bill_totals[_pl_cat] = round(
-                    _bill_totals.get(_pl_cat, 0.0) + _amt, 2
-                )
-        # Add each bill category to pl_items (skip Mgmt Fees — already in money_out)
+            if _section not in ('opex', 'utilities'):
+                continue
+            if _pl_cat == 'Management Fees':
+                continue
+            # Full description: "Category - detail" (omit detail if it's just the category)
+            _full_desc = (
+                f"{_cat_text} — {_desc_text}"
+                if _desc_text.lower() != _cat_text.lower()
+                else _cat_text
+            )
+            _bill_items.append({
+                'description': _full_desc,
+                'category':    _pl_cat,
+                'amount':      _amt,
+            })
+            _bill_totals[_pl_cat] = round(_bill_totals.get(_pl_cat, 0.0) + _amt, 2)
+        # Store individual items for detailed UI display
+        result['bill_items'] = _bill_items
+        # Also keep category totals in pl_items for P&L math
         for _pl_cat, _amt in _bill_totals.items():
-            if _pl_cat != 'Management Fees':
-                result['pl_items'][_pl_cat] = _amt
+            result['pl_items'][_pl_cat] = _amt
 
     # ── Room breakdown ───────────────────────────────────────────────────────
     if _is_ailo:
@@ -1050,7 +1272,7 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         _room_positions = [
             (m.start(), m.group(1), m.group(2))
             for m in re.finditer(
-                r'(Room\s+\d+),\s+[^\n]+?Net income:\s+\$([\d,]+\.?\d*)',
+                r'(Room\s+\d+),\s+[^\n]+?Net income:\s+(-?\$[\d,]+\.?\d*)',
                 text, re.IGNORECASE
             )
         ]
@@ -1081,14 +1303,31 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
                 'net':  _rnet,          # always from the authoritative Net income header
             }
     else:
-        # Generic: locate each room/unit heading then find its "Total $out $in" summary
-        # row within the next 600 chars.  This avoids matching address numbers or
-        # per-week rent figures that appear earlier in the room block.
-        for _rm_m in re.finditer(
-            r'(room\s*\d+\b|unit\s*\w+\b)(?!\s*/)', text, re.IGNORECASE
-        ):
-            _rname   = _rm_m.group(1).strip().title()
-            _segment = text[_rm_m.start(): _rm_m.start() + 600]
+        # Generic room detection.
+        # PropertyMe format uses "Room N/address" (slash after number).
+        # The old (?!\s*/) negative-lookahead EXCLUDED the real headers — fixed here:
+        # prefer slash-format rooms; fall back to non-slash only if none found.
+        _pm_room_matches = list(re.finditer(
+            r'(room\s*\d+|unit\s*[\w\d]+)\s*/', text, re.IGNORECASE
+        ))
+        _generic_room_matches = list(re.finditer(
+            r'(?<![/\d])(room\s*\d+\b|unit\s*\w+\b)(?![\s]*/)', text, re.IGNORECASE
+        ))
+        _room_candidates = _pm_room_matches if _pm_room_matches else _generic_room_matches
+        for _i, _rm_m in enumerate(_room_candidates):
+            # Extract just "Room N" / "Unit N" from the match (strip the trailing "/")
+            _rname_m = re.match(r'(room\s*\d+|unit\s*[\w\d]+)', _rm_m.group(), re.IGNORECASE)
+            if not _rname_m:
+                continue
+            _rname   = _rname_m.group().strip().title()
+            # Segment: extend to the NEXT room header so we don't miss a Total row
+            # when a room has many rent payment lines (can exceed 600 chars easily)
+            _next_start = (
+                _room_candidates[_i + 1].start()
+                if _i + 1 < len(_room_candidates)
+                else _rm_m.start() + 1500
+            )
+            _segment = text[_rm_m.start(): _next_start]
             _tot = re.search(
                 r'Total\s+\$([\d,]+\.?\d*)\s+\$([\d,]+\.?\d*)',
                 _segment, re.IGNORECASE
@@ -1101,6 +1340,36 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
                     'rent': _rent, 'mgmt': _mgmt,
                     'net':  round(_rent - _mgmt, 2),
                 }
+
+    # ── PropertyMe-style bill item extraction ────────────────────────────────
+    # PropertyMe bills appear as "description * $amount" lines (not Ailo "·" format).
+    # Extract individual items, categorise them, store in bill_items for UI display.
+    if not _is_ailo and not result.get('bill_items'):
+        _pm_bill_pat = re.compile(
+            r'^([^\n*]{5,100}?)\s*\*\s+\$([\d,]+\.?\d*)\s*$',
+            re.MULTILINE
+        )
+        _pm_skip = re.compile(
+            r'^(management fee|rent paid|balance brought|gst|total\s+tax|'
+            r'withdrawal|eft\s+to|disbursement)',
+            re.IGNORECASE
+        )
+        _pm_items:  list  = []
+        _pm_totals: dict  = {}
+        for _bm in _pm_bill_pat.finditer(text):
+            _desc = _bm.group(1).strip()
+            _amt  = _parse_amount(_bm.group(2)) or 0.0
+            if _amt <= 0 or _pm_skip.match(_desc):
+                continue
+            _section, _pl_cat = _categorize_by_keywords(_desc)
+            if _pl_cat == 'Management Fees':
+                continue
+            _pm_items.append({'description': _desc, 'category': _pl_cat, 'amount': _amt})
+            _pm_totals[_pl_cat] = round(_pm_totals.get(_pl_cat, 0.0) + _amt, 2)
+        if _pm_items:
+            result['bill_items'] = _pm_items
+            for _cat, _total in _pm_totals.items():
+                result['pl_items'][_cat] = _total
 
     # ── Tier B: table fallback ─────────────────────────────────────────────
     # Trigger when regex extracted nothing meaningful
@@ -1135,9 +1404,31 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         else:
             result['parse_source'] = 'failed'
 
-    # Set base items — bill items extracted earlier in the Ailo branch are preserved
-    result['pl_items']['Rental Income']   = result['money_in']
-    result['pl_items']['Management Fees'] = result['money_out']
+    # Set base items — bill items extracted earlier in the Ailo/PropertyMe branch are preserved
+    result['pl_items']['Rental Income'] = result['money_in']
+
+    if _is_ailo:
+        # Ailo money_out was set to management fees only ("Total paid in agency fees").
+        # pl_items['Management Fees'] = that mgmt-fees-only figure.
+        # Then recalculate money_out = mgmt + all bill expenses so the displayed
+        # "Total Expenses" matches reality and money_in - money_out ≈ eft.
+        result['pl_items']['Management Fees'] = result['money_out']   # mgmt fees only
+        if result.get('bill_items'):
+            # Sum every pl_item that is NOT Rental Income
+            result['money_out'] = round(
+                sum(v for k, v in result['pl_items'].items() if k != 'Rental Income'), 2
+            )
+    else:
+        # For non-Ailo (PropertyMe etc.): money_out already equals total expenses.
+        # Management Fees = money_out minus any separately-extracted bill expenses.
+        _bill_expense_total = sum(
+            v for k, v in result['pl_items'].items()
+            if k not in ('Rental Income', 'Management Fees')
+        )
+        result['pl_items']['Management Fees'] = round(
+            max(0.0, result['money_out'] - _bill_expense_total), 2
+        )
+
     return result
 
 
