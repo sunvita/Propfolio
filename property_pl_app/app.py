@@ -857,32 +857,42 @@ elif st.session_state.step == 1:
     st.markdown('<div class="step-badge">STEP 1 of 4</div>', unsafe_allow_html=True)
     st.markdown("### Property Setup")
 
+    # ── Initialise session-state defaults ONCE (never overwrite existing values) ─
+    # Pattern: set default BEFORE the widget; widget then owns the value via key=.
+    # Do NOT also pass index=/value= — that causes Streamlit to reset the widget
+    # to the computed default on every re-render, defeating the key= persistence.
+    if 'setup_n_props'  not in st.session_state:
+        st.session_state['setup_n_props']  = 1
+    if 'setup_fy_start' not in st.session_state:
+        st.session_state['setup_fy_start'] = list(MONTH_NAMES.keys())[6]   # July
+    if 'setup_fy_first' not in st.session_state:
+        st.session_state['setup_fy_first'] = 2024
+    if 'setup_fy_last'  not in st.session_state:
+        st.session_state['setup_fy_last']  = 2029
+
     col1, col2 = st.columns(2)
     with col1:
-        n_props = st.selectbox("Number of properties", list(range(1, 11)),
-                               index=list(range(1, 11)).index(
-                                   st.session_state.get('setup_n_props', 1)),
-                               key='setup_n_props',
-                               help="Up to 10 properties. Each gets its own tab.")
+        n_props = st.selectbox(
+            "Number of properties", list(range(1, 11)),
+            key='setup_n_props',
+            help="Up to 10 properties. Each gets its own tab."
+        )
         fy_start = st.selectbox(
             "Financial Year start month",
             list(MONTH_NAMES.keys()),
             format_func=lambda x: MONTH_NAMES[x],
-            index=list(MONTH_NAMES.keys()).index(
-                st.session_state.get('setup_fy_start', list(MONTH_NAMES.keys())[6])),
             key='setup_fy_start',
             help="Australian FY = July. Change if your FY starts in a different month."
         )
 
     with col2:
         st.markdown("**FY Period Range**")
-        cy_now = 2025   # current default
         fy_c1, fy_c2 = st.columns(2)
         with fy_c1:
             fy_first = st.number_input(
                 "Oldest FY start year",
                 min_value=2010, max_value=2040,
-                value=int(st.session_state.get('setup_fy_first', 2024)), step=1,
+                step=1,
                 key='setup_fy_first',
                 help="Oldest year with actual data. e.g. 2024 → FY 2024-25"
             )
@@ -890,7 +900,7 @@ elif st.session_state.step == 1:
             fy_last = st.number_input(
                 "Template extends to FY",
                 min_value=2010, max_value=2050,
-                value=int(st.session_state.get('setup_fy_last', 2029)), step=1,
+                step=1,
                 key='setup_fy_last',
                 help="Last template year. e.g. 2029 → FY 2029-30"
             )
@@ -915,13 +925,23 @@ elif st.session_state.step == 1:
     st.markdown("---")
     st.markdown("### Property Details")
 
+    # ── Initialise per-property field defaults once (never overwrite user input) ─
+    for _i in range(n_props):
+        if f'name_{_i}' not in st.session_state:
+            st.session_state[f'name_{_i}'] = f"IP#{_i+1} — Property Name"
+        if f'pp_{_i}' not in st.session_state:
+            st.session_state[f'pp_{_i}'] = 0.0
+        if f'cv_{_i}' not in st.session_state:
+            st.session_state[f'cv_{_i}'] = 0.0
+        if f'mg_{_i}' not in st.session_state:
+            st.session_state[f'mg_{_i}'] = 0.0
+
     prop_configs = []
     for i in range(n_props):
         with st.expander(f"Property {i+1}", expanded=(i == 0)):
             c1, c2 = st.columns(2)
             with c1:
                 name = st.text_input(f"Property name", key=f"name_{i}",
-                                     value=f"IP#{i+1} — Property Name",
                                      placeholder="e.g. IP#1 — 3A Montfort St")
                 address = st.text_input(f"Address", key=f"addr_{i}",
                                         placeholder="e.g. 3A Montfort St, Quakers Hill NSW")
@@ -930,12 +950,12 @@ elif st.session_state.step == 1:
                                          help="4-digit Australian postcode — used as primary key for address matching")
             with c2:
                 purchase_price = st.number_input(f"Purchase Price ($)", key=f"pp_{i}",
-                                                 min_value=0.0, value=0.0, step=1000.0,
+                                                 min_value=0.0, step=1000.0,
                                                  help="Used for yield calculations in Summary tab")
                 current_value  = st.number_input(f"Current Value ($)", key=f"cv_{i}",
-                                                 min_value=0.0, value=0.0, step=1000.0)
+                                                 min_value=0.0, step=1000.0)
                 mortgage       = st.number_input(f"Mortgage Balance ($)", key=f"mg_{i}",
-                                                 min_value=0.0, value=0.0, step=1000.0)
+                                                 min_value=0.0, step=1000.0)
 
             tab_name = f"IP#{i+1}"
             prop_configs.append({
@@ -948,16 +968,53 @@ elif st.session_state.step == 1:
                 'mortgage':       mortgage        or None,
             })
 
-    if st.button("Next: Upload PDFs →", type="primary", use_container_width=True):
+    # ── Warn if reducing property count would drop data ───────────────────────
+    _existing_props_check = {p['tab']: p for p in st.session_state.get('properties', [])}
+    _new_tabs = {f"IP#{i+1}" for i in range(n_props)}
+    _tabs_with_data_dropped = [
+        tab for tab, prop in _existing_props_check.items()
+        if tab not in _new_tabs and prop.get('data')
+    ]
+    if _tabs_with_data_dropped:
+        _dropped_names = ', '.join(
+            _existing_props_check[t].get('name', t) for t in sorted(_tabs_with_data_dropped)
+        )
+        st.warning(
+            f"⚠️ **Reducing property count will permanently remove parsed data for: "
+            f"{_dropped_names}.** Tick the box below to confirm, then click Next.",
+            icon=None
+        )
+        _confirm_drop = st.checkbox(
+            f"Yes, I understand — remove data for {_dropped_names}",
+            key='confirm_prop_drop'
+        )
+    else:
+        _confirm_drop = True   # no data at risk, proceed freely
+
+    if st.button("Next: Upload PDFs →", type="primary", use_container_width=True,
+                 disabled=not _confirm_drop):
         if fy_last < fy_first:
             st.error("FY range error: 'Template extends to' must be ≥ 'Oldest FY start year'.")
             st.stop()
         st.session_state.fy_start_month = fy_start
         st.session_state.fy_labels      = make_fy_labels(int(fy_first), int(fy_last))
         st.session_state.prop_configs   = prop_configs
-        # Initialize empty data containers
+        # Reset confirmation checkbox for next time
+        st.session_state.pop('confirm_prop_drop', None)
+
+        # ── Preserve existing P&L data when returning to Setup ─────────────
+        # Map tab → existing property entry (preserves months of parsed data)
+        _existing_props  = {p['tab']: p for p in st.session_state.get('properties', [])}
+        _existing_pinfo  = st.session_state.get('purchase_info', {})
+
         st.session_state.properties = [
-            {'name': p['name'], 'tab': p['tab'], 'data': {}}
+            {
+                'name': p['name'],
+                'tab':  p['tab'],
+                # Keep any P&L data already parsed for this property tab
+                'data': _existing_props[p['tab']]['data']
+                        if p['tab'] in _existing_props else {},
+            }
             for p in prop_configs
         ]
         st.session_state.purchase_info = {
@@ -967,10 +1024,20 @@ elif st.session_state.step == 1:
                 'purchase_price': p['purchase_price'],
                 'current_value':  p['current_value'],
                 'mortgage':       p['mortgage'],
-                'purchase_date':  None,
+                # Preserve purchase_date set in later steps (Step 3 editor)
+                'purchase_date':  _existing_pinfo.get(p['tab'], {}).get('purchase_date'),
             }
             for p in prop_configs
         }
+        # ── Drop parsed results belonging to removed property tabs ──────────
+        _kept_tabs = {p['tab'] for p in prop_configs}
+        _existing_parsed = st.session_state.get('parsed_results', [])
+        if _existing_parsed:
+            st.session_state.parsed_results = [
+                r for r in _existing_parsed
+                if r.get('_prop_tab') in _kept_tabs
+            ]
+
         st.session_state.step = 2
         st.rerun()
 
