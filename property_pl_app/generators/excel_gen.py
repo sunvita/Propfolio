@@ -841,6 +841,27 @@ def build_workbook(
               Fill(th['section']), Aln('right'), nm)
     r += 2
 
+    # ── Active/inactive maps for Summary tab (aggregate across all properties) ──
+    _month_seq_s = _fy_months(fy_start_month)
+    sum_fy_has_data_map = {
+        fy: any(
+            any(
+                (int(fy.split('-')[0]) if mo >= fy_start_month
+                 else int(fy.split('-')[0]) + 1, mo) in prop.get('data', {})
+                for mo in _month_seq_s
+            )
+            for prop in properties
+        )
+        for fy in fy_labels
+    }
+    sum_cy_has_data_map = {
+        cy: any(
+            any((cy, mo) in prop.get('data', {}) for mo in range(1, 13))
+            for prop in properties
+        )
+        for cy in cy_labels
+    }
+
     # ── TABLE A ───────────────────────────────────────────────────────────────
     TA_LAST = 1 + len(all_per)
 
@@ -867,7 +888,12 @@ def build_workbook(
 
     for ci, pk in enumerate(all_per, 2):
         is_cy = pk.startswith('CY')
-        bg    = CY_YELLOW if is_cy else FY_YELLOW
+        if is_cy:
+            cy_key = int(pk.split()[1])
+            bg = CY_YELLOW if sum_cy_has_data_map.get(cy_key) else MED_GREY
+        else:
+            fy_key = pk[3:]
+            bg = FY_YELLOW if sum_fy_has_data_map.get(fy_key) else MED_GREY
         wcell(ws_s, r, ci, pk, F(bold=True, size=9), Fill(bg),
               Aln('center', wrap=True))
     r += 1
@@ -897,7 +923,12 @@ def build_workbook(
             for ci, pk in enumerate(all_per, 2):
                 tc    = period_tab_col.get(pk)
                 is_cy = pk.startswith('CY')
-                bg    = CY_YELLOW if is_cy else FY_YELLOW
+                if is_cy:
+                    cy_key = int(pk.split()[1])
+                    bg = CY_YELLOW if sum_cy_has_data_map.get(cy_key) else MED_GREY
+                else:
+                    fy_key = pk[3:]
+                    bg = FY_YELLOW if sum_fy_has_data_map.get(fy_key) else MED_GREY
                 formula = f"={tab_q}!{col(tc)}{pl_row_num}" if tc and pl_row_num else None
                 wcell(ws_s, r, ci, formula,
                       F(size=9, color=GREEN_LINK), Fill(bg), Aln('right'), nm)
@@ -909,7 +940,12 @@ def build_workbook(
         for ci, pk in enumerate(all_per, 2):
             cl    = col(ci)
             is_cy = pk.startswith('CY')
-            bg    = CY_YELLOW if is_cy else FY_YELLOW
+            if is_cy:
+                cy_key = int(pk.split()[1])
+                bg = CY_YELLOW if sum_cy_has_data_map.get(cy_key) else MED_GREY
+            else:
+                fy_key = pk[3:]
+                bg = FY_YELLOW if sum_fy_has_data_map.get(fy_key) else MED_GREY
             formula = (f'=IFERROR(AVERAGE({cl}{prop_start_r}:{cl}{r-1}),"-")'
                        if kpi_disp == 'NOI Margin %' else
                        f'=SUM({cl}{prop_start_r}:{cl}{r-1})')

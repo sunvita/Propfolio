@@ -418,9 +418,14 @@ def _merge_parsed_to_properties():
         # ── Build new_items dict from parse result ──────────────────────────
         new_items: dict[str, float] = {}
         if result['type'] == 'rental':
+            # Use pl_items['Management Fees'] (= money_out minus bill expenses already extracted)
+            # to avoid double-counting when bill items (maintenance, cleaning, etc.) are also
+            # stored separately below. Falls back to money_out if pl_items key is absent.
+            _pure_mgmt = result.get('pl_items', {}).get('Management Fees',
+                                                        result.get('money_out', 0))
             new_items = {
                 'Rental Income':       result.get('money_in',  0),
-                'Management Fees':     result.get('money_out', 0),
+                'Management Fees':     _pure_mgmt,
                 'Cash Received (EFT)': result.get('eft',       0),
             }
             # Merge itemised bill expenses extracted from the statement
