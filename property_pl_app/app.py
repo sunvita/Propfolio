@@ -680,8 +680,8 @@ if st.session_state.step == 0:
         '<!-- folio -->'
         '<text x="112" y="37" font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif" font-size="34" font-weight="300" fill="#FFA726" letter-spacing="3">folio</text>'
         '</svg>'
-        '<p style="margin:10px 0 0;opacity:0.85;font-size:17px;">Negatively or positively geared — and by how much?</p>'
-        '<p style="margin:6px 0 0;opacity:0.75;font-size:15px;">'
+        '<p style="margin:10px 0 0;font-size:17px;color:#FFFFFF;">Negatively or positively geared — and by how much?</p>'
+        '<p style="margin:6px 0 0;font-size:17px;color:#FFFFFF;">'
         'Drop your files. Propfolio knows exactly!</p>'
         '</div>',
         unsafe_allow_html=True
