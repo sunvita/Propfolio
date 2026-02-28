@@ -13,7 +13,7 @@ import calendar
 from difflib import SequenceMatcher
 from openpyxl import load_workbook
 
-from parsers.pdf_parser import parse_pdf
+from parsers.pdf_parser import parse_pdf, parse_document, cross_check_bank
 import parsers.pdf_parser as _pdf_parser_module
 _PARSER_VERSION = getattr(_pdf_parser_module, '__doc__', '').split('Parser version:')[-1].strip().split('\n')[0].strip() if 'Parser version:' in (getattr(_pdf_parser_module, '__doc__', '') or '') else 'unknown'
 from generators.excel_gen import build_workbook
@@ -388,9 +388,30 @@ def _merge_parsed_to_properties():
                 if _pl_cat not in new_items and _amt > 0:
                     new_items[_pl_cat] = _amt
         elif result['type'] == 'bank':
+            # Build set of P&L categories already covered by rental statements
+            # for this property + period, so bank data doesn't double-count them.
+            _covered_by_rental: set[str] = set()
+            for _r in st.session_state.parsed_results:
+                if (_r.get('_prop_tab') == tab
+                        and _r.get('type') == 'rental'
+                        and _r.get('year') == yr
+                        and _r.get('month') == mo):
+                    _covered_by_rental.update(
+                        {'Rental Income', 'Management Fees',
+                         'Cash Received (EFT)'})
+                    _covered_by_rental.update(
+                        k for k, v in _r.get('pl_items', {}).items() if v > 0)
+
             for _sec, cats in result.get('categorized', {}).items():
                 for cat, amt in cats.items():
-                    new_items[cat] = new_items.get(cat, 0) + amt
+                    # Skip categories already captured from rental statements
+                    # (e.g. Management Fees deducted before disbursement)
+                    if cat in _covered_by_rental:
+                        continue
+                    # Only add positive-net amounts (don't subtract bank debits
+                    # that have already been counted as expenses elsewhere)
+                    if amt != 0:
+                        new_items[cat] = new_items.get(cat, 0) + amt
         elif result['type'] == 'utility':
             utype = result.get('utility_type', 'Miscellaneous')
             new_items = {utype: result.get('amount', 0)}
@@ -1007,10 +1028,11 @@ elif st.session_state.step == 2:
             )
 
             uploaded = st.file_uploader(
-                f"Upload PDFs for {prop['name']}",
-                type=['pdf'],
+                f"Upload PDFs or CSV bank exports for {prop['name']}",
+                type=['pdf', 'csv', 'tsv'],
                 accept_multiple_files=True,
                 key=f"upload_{tab}",
+                help="PDF: rental statements, invoices, utilities. CSV/TSV: bank statement exports (Westpac, CBA, ANZ, NAB, etc.)"
             )
             if uploaded:
                 total_files += len(uploaded)
@@ -1035,7 +1057,7 @@ elif st.session_state.step == 2:
                 st.session_state.step = 1
                 st.rerun()
         with col2:
-            if st.button("Parse All PDFs →", type="primary",
+            if st.button("Parse All Files →", type="primary",
                          use_container_width=True, disabled=(total_files == 0)):
                 # Gather all files from widget state, parse in one pass
                 all_to_parse = []
@@ -1052,7 +1074,7 @@ elif st.session_state.step == 2:
                 total = len(all_to_parse)
                 for idx, (tab, fname, fbytes, dt) in enumerate(all_to_parse):
                     status_txt.text(f"Parsing {fname}  ({idx + 1}/{total})…")
-                    result = parse_pdf(fbytes, filename=fname, doc_type=dt)
+                    result = parse_document(fbytes, filename=fname, doc_type=dt)
                     result['_prop_tab'] = tab
                     result['_filename'] = fname
                     newly_parsed.append(result)
@@ -1213,12 +1235,88 @@ elif st.session_state.step == 2:
 
                 elif result['type'] == 'bank':
                     txns = result.get('transactions', [])
+                    _llm_cnt = result.get('llm_count', 0)
+                    _src     = result.get('source', 'pdf').upper()
                     if txns:
-                        df = pd.DataFrame(txns)[['date', 'description', 'amount', 'type', 'category']]
-                        st.dataframe(df, use_container_width=True, height=200)
-                        st.markdown(f"**{len(txns)} transactions** extracted")
+                        # ── Summary metrics ────────────────────────────────
+                        _credits = [t for t in txns if t['type'] == 'credit']
+                        _debits  = [t for t in txns if t['type'] == 'debit']
+                        _tot_in  = sum(t['amount'] for t in _credits)
+                        _tot_out = sum(t['amount'] for t in _debits)
+                        _misc_n  = sum(1 for t in txns if t['category'] == 'Miscellaneous')
+                        _bm1, _bm2, _bm3, _bm4 = st.columns(4)
+                        _bm1.metric("Source",       _src)
+                        _bm2.metric("Transactions", len(txns))
+                        _bm3.metric("Credits",      f"${_tot_in:,.2f}")
+                        _bm4.metric("Debits",       f"${_tot_out:,.2f}")
+                        if _llm_cnt:
+                            st.info(f"🤖 LLM self-categorised **{_llm_cnt}** new transaction type(s) — keywords saved for future parsing.")
+                        if _misc_n:
+                            st.warning(f"⚠️ **{_misc_n}** transaction(s) still uncategorised (Miscellaneous) — consider adding custom keywords or uploading more docs.")
+
+                        # ── Transaction table ──────────────────────────────
+                        _df_bank = pd.DataFrame(txns)[['date', 'description', 'amount', 'type', 'section', 'category']]
+                        st.dataframe(_df_bank, use_container_width=True, height=220)
+
+                        # ── Category breakdown ─────────────────────────────
+                        cat_data = result.get('categorized', {})
+                        if cat_data:
+                            _rows = []
+                            for _sec, _cats in cat_data.items():
+                                for _cat, _amt in _cats.items():
+                                    _rows.append({'Section': _sec.title(), 'Category': _cat, 'Net Amount ($)': _amt})
+                            if _rows:
+                                st.markdown("**Category totals:**")
+                                st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+
+                        # ── Cross-check vs other docs (same property/period) ──
+                        _other_in_tab = [
+                            r for r in parsed_all
+                            if r.get('_prop_tab') == tab
+                            and r.get('type') in ('rental', 'utility', 'invoice')
+                            and r.get('year') == yr
+                        ]
+                        if _other_in_tab:
+                            _xchk = cross_check_bank(result, _other_in_tab)
+                            _sm   = _xchk['summary']
+                            st.markdown("---")
+                            st.markdown("**🔍 Cross-check vs other documents**")
+                            _xc1, _xc2, _xc3 = st.columns(3)
+                            _xc1.metric("✅ Matched",        _sm['matched'])
+                            _xc2.metric("🏦 Unmatched bank", _sm['unmatched_bank'])
+                            _xc3.metric("📄 Unmatched docs", _sm['unmatched_docs'])
+
+                            if _xchk['rent_matches']:
+                                with st.expander(f"✅ Rent disbursements matched ({len(_xchk['rent_matches'])})"):
+                                    for _m in _xchk['rent_matches']:
+                                        _delta_str = f"  Δ${_m['delta']:.2f}" if _m['delta'] > 0 else ""
+                                        st.markdown(
+                                            f"• Bank credit **${_m['bank']['amount']:,.2f}** "
+                                            f"← {_m['doc'].get('filename','')}{_delta_str}"
+                                        )
+                            if _xchk['expense_matches']:
+                                with st.expander(f"✅ Expense debits matched ({len(_xchk['expense_matches'])})"):
+                                    for _m in _xchk['expense_matches']:
+                                        _delta_str = f"  Δ${_m['delta']:.2f}" if _m['delta'] > 0 else ""
+                                        st.markdown(
+                                            f"• Bank debit **${_m['bank']['amount']:,.2f}** "
+                                            f"[{_m['category']}] ← {_m['doc'].get('filename','')}{_delta_str}"
+                                        )
+                            if _xchk['unmatched_bank']:
+                                with st.expander(f"🏦 Unmatched bank transactions ({len(_xchk['unmatched_bank'])})"):
+                                    st.caption("These bank entries have no matching document uploaded.")
+                                    _ub_df = pd.DataFrame(_xchk['unmatched_bank'])[['date','description','amount','type','category']]
+                                    st.dataframe(_ub_df, use_container_width=True, hide_index=True)
+                            if _xchk['unmatched_docs']:
+                                with st.expander(f"📄 Documents without bank match ({len(_xchk['unmatched_docs'])})"):
+                                    st.caption("These items from other documents were not found in the bank statement.")
+                                    for _ud in _xchk['unmatched_docs']:
+                                        st.markdown(
+                                            f"• **${_ud['amount']:,.2f}** [{_ud['category']}] "
+                                            f"— {_ud['filename']}"
+                                        )
                     else:
-                        st.warning("No transactions extracted. The PDF format may need manual review.")
+                        st.warning("No transactions extracted. Try uploading a CSV export from your bank instead of a PDF.")
 
                 elif result['type'] == 'utility':
                     c1, c2 = st.columns(2)

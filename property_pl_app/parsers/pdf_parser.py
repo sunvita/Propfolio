@@ -5,7 +5,7 @@ PDF parsers for property P&L:
   3. Utility bills  (electricity, water, gas, internet)
   4. Invoices / Notices  (council rates, land tax, strata, insurance, trades, etc.)
 
-Parser version: 2026-02-28-v12
+Parser version: 2026-02-28-v13
 """
 
 import re
@@ -1069,6 +1069,99 @@ def _extract_invoice_amount(text: str) -> float:
     return 0.0
 
 
+def _ailo_bills_from_columns(text: str) -> tuple:
+    """
+    Extract Ailo bill items using description-based classification.
+
+    In Ailo statements each line item's category label and description text
+    determine whether it is an owner expense (e.g. maintenance, gardening) or a
+    tenant-generated income receipt (e.g. lease break fees, bond money).  The
+    description is the authoritative signal — NOT the dollar amount's position on
+    the page, which is merely a visual rendering artifact.
+
+    Classification rules (in order):
+    1. Skip header/summary lines (rent payments, management fees, totals, GST…)
+       via _BILL_SKIP — these are never individual bill items.
+    2. Skip known INCOME transactions via _AILO_INCOME — these represent money
+       received FROM the tenant or third party and must not inflate owner expenses.
+       Examples: lease break fees, bond money received, water billing to tenant,
+       rental guarantee payments, insurance claim proceeds.
+    3. Accept remaining items only if _categorize_by_keywords maps them to an
+       opex/utilities section — this filters out any remaining non-expense items
+       (items categorised as income, financing, etc. by the keyword engine).
+    4. Skip Management Fees — handled separately from the stated money_out figure.
+
+    Returns (bill_items: list, bill_totals: dict[category, float]).
+    """
+    # ── Header / summary lines — never individual bill items ─────────────────
+    _BILL_SKIP = re.compile(
+        r'^(rent\s+payment|management\s+fees?|paid\s+on|contributions?|'
+        r'failed|transfer\s+to|withdrawal|total|gst|overview|income|expenses)',
+        re.IGNORECASE
+    )
+
+    # ── Tenant-generated income receipts — must NOT become owner expenses ─────
+    # These describe money the owner RECEIVES (from tenant, insurer, etc.) and
+    # appear in the In column of the Ailo statement.  Adding a new pattern here
+    # is the correct way to handle any newly encountered income item type.
+    _AILO_INCOME = re.compile(
+        r'lease\s*break|break\s*lease|break\s*fee|'           # tenant breaks lease early
+        r'bond\s*(money|paid|receipt|received|return|refund|interest)|pet\s*bond|'  # bond income
+        r'water\s*(billing|charge|reimburs|usage)|tenant\s*water|'   # water charges passed to tenant
+        r'advertising\s*recovery|'                            # tenant reimburses advertising cost
+        r'rent\s*guarantee|rental\s*guarantee|'              # guaranteed rent / rental guarantee
+        r'insurance\s*(claim|proceed|payout|recovery)|'      # insurance income received by owner
+        r'compensation\s*(received|from)|'                   # compensation from tenant/NCAT/VCAT
+        r'damage\s*(claim|recovery|contribution)|'           # damage recovery from tenant
+        r'tribunal\s*(order|award)|ncat\s*order|vcat\s*order',  # tribunal-ordered payment to owner
+        re.IGNORECASE
+    )
+
+    # Match:  "[Category] · [description...] $amount"  on a single line
+    _bill_pattern = re.compile(
+        r'^([A-Za-z][^\n·]{1,60}?)\s+·\s+([^\n$]{1,120}?)\s*\$([\d,]+\.?\d*)\s*$',
+        re.MULTILINE
+    )
+
+    bill_items: list = []
+    bill_totals: dict = {}
+
+    for _bm in _bill_pattern.finditer(text):
+        _cat_text  = _bm.group(1).strip()
+        _desc_text = _bm.group(2).strip().rstrip('·').strip()
+        _amt       = _parse_amount(_bm.group(3)) or 0.0
+
+        if _amt <= 0 or _BILL_SKIP.match(_cat_text):
+            continue
+
+        # Rule 2: skip if category or description identifies this as income
+        if _AILO_INCOME.search(f'{_cat_text} {_desc_text}'):
+            continue
+
+        # Rule 3: only accept opex / utilities categories
+        _section, _pl_cat = _categorize_by_keywords(_cat_text)
+        if _section not in ('opex', 'utilities'):
+            continue
+
+        # Rule 4: management fees tracked separately
+        if _pl_cat == 'Management Fees':
+            continue
+
+        _full_desc = (
+            f"{_cat_text} — {_desc_text}"
+            if _desc_text.lower() != _cat_text.lower()
+            else _cat_text
+        )
+        bill_items.append({
+            'description': _full_desc,
+            'category':    _pl_cat,
+            'amount':      _amt,
+        })
+        bill_totals[_pl_cat] = round(bill_totals.get(_pl_cat, 0.0) + _amt, 2)
+
+    return bill_items, bill_totals
+
+
 # ── 1. RENTAL / OWNERSHIP STATEMENT ──────────────────────────────────────────
 def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
     text = _extract_text(file_bytes)
@@ -1218,46 +1311,11 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
                     result[_key] = _val
 
     # ── Ailo itemised bill extraction ────────────────────────────────────────
-    # Extract individual expense lines ("Category · description $amount") and
-    # store each as a separate entry in result['bill_items'] so the UI can
-    # show the full breakdown (not just category totals).
+    # Use pdfplumber word x-coordinates to distinguish In column (income items
+    # Description-based: income receipts (lease break fees, bond money, etc.)
+    # are excluded by _AILO_INCOME keywords; only genuine owner expenses are kept.
     if _is_ailo:
-        _BILL_SKIP = re.compile(
-            r'^(rent\s+payment|management\s+fees?|paid\s+on|contributions?|'
-            r'failed|transfer\s+to|withdrawal|total|gst|overview|income|expenses)',
-            re.IGNORECASE
-        )
-        # Match:  "[Category] · [description...] $amount"  on a single line
-        # group 1 = category label, group 2 = description, group 3 = amount
-        _bill_pattern = re.compile(
-            r'^([A-Za-z][^\n·]{1,60}?)\s+·\s+([^\n$]{1,120}?)\s*\$([\d,]+\.?\d*)\s*$',
-            re.MULTILINE
-        )
-        _bill_totals: dict[str, float] = {}
-        _bill_items: list = []
-        for _bm in _bill_pattern.finditer(text):
-            _cat_text  = _bm.group(1).strip()
-            _desc_text = _bm.group(2).strip().rstrip('·').strip()
-            _amt       = _parse_amount(_bm.group(3)) or 0.0
-            if _amt <= 0 or _BILL_SKIP.match(_cat_text):
-                continue
-            _section, _pl_cat = _categorize_by_keywords(_cat_text)
-            if _section not in ('opex', 'utilities'):
-                continue
-            if _pl_cat == 'Management Fees':
-                continue
-            # Full description: "Category - detail" (omit detail if it's just the category)
-            _full_desc = (
-                f"{_cat_text} — {_desc_text}"
-                if _desc_text.lower() != _cat_text.lower()
-                else _cat_text
-            )
-            _bill_items.append({
-                'description': _full_desc,
-                'category':    _pl_cat,
-                'amount':      _amt,
-            })
-            _bill_totals[_pl_cat] = round(_bill_totals.get(_pl_cat, 0.0) + _amt, 2)
+        _bill_items, _bill_totals = _ailo_bills_from_columns(text)
         # Store individual items for detailed UI display
         result['bill_items'] = _bill_items
         # Also keep category totals in pl_items for P&L math
@@ -1517,7 +1575,32 @@ def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
                     'section': section, 'category': category,
                 })
 
+    # ── LLM self-learning fallback for still-Miscellaneous transactions ─────────
+    _seen_desc_prefixes: set = set()
+    _llm_count = 0
+    for tx in transactions:
+        if tx['category'] != 'Miscellaneous':
+            continue
+        # Deduplicate by first 40 chars of description so we don't spam the API
+        _prefix = tx['description'][:40].lower().strip()
+        if _prefix in _seen_desc_prefixes:
+            continue
+        _seen_desc_prefixes.add(_prefix)
+        _llm_result = _llm_categorise(
+            f"Bank {tx['type']} ${tx['amount']:.2f}: {tx['description']}",
+            doc_type='bank'
+        )
+        if _llm_result:
+            _sec, _cat, _kw = _llm_result
+            _save_learned_category(_kw, _sec, _cat, tx['description'])
+            # Apply to all transactions with the same description prefix
+            for _tx2 in transactions:
+                if _tx2['description'][:40].lower().strip() == _prefix:
+                    _tx2['section'], _tx2['category'] = _sec, _cat
+            _llm_count += 1
+
     result['transactions'] = transactions
+    result['llm_count']    = _llm_count
 
     cat_totals: dict[str, dict[str, float]] = {}
     for tx in transactions:
@@ -1528,6 +1611,359 @@ def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
 
     result['categorized'] = cat_totals
     return result
+
+
+# ── 2b. CSV BANK STATEMENT ───────────────────────────────────────────────────
+def parse_bank_csv(file_bytes: bytes, filename: str = '') -> dict:
+    """
+    Parse a CSV / TSV bank statement export (common from Australian banks).
+
+    Handles formats used by major Australian banks:
+      • Westpac / St.George: Date, Description, Debit, Credit, Balance
+      • CBA:                  Date, Amount, Description, Balance
+      • ANZ:                  Date, Description, Amount
+      • NAB:                  Date, Amount, Description
+      • Bankwest:             Date, Narration, Cheque, Debit, Credit, Balance
+
+    Signs:  credit (+) = money INTO the account (rent received, refunds)
+            debit  (–) = money OUT of the account (expenses paid)
+
+    Self-learning: any transaction still 'Miscellaneous' after keyword lookup
+    is sent to the LLM; the returned keyword is saved to learned_categories.json
+    so the same pattern never reaches the API again.
+    """
+    import csv as _csv
+    import io as _io
+
+    result: dict = {
+        'type':         'bank',
+        'filename':     filename,
+        'year':         None,
+        'month':        None,
+        'transactions': [],
+        'categorized':  {},
+        'raw_text':     '',
+        'source':       'csv',
+        'llm_count':    0,
+    }
+
+    # Decode — strip UTF-8 BOM if present
+    text = file_bytes.decode('utf-8-sig', errors='replace')
+    result['raw_text'] = text[:2000]
+
+    # Detect delimiter
+    sample = text[:3000]
+    delimiter = '\t' if sample.count('\t') > sample.count(',') else ','
+
+    rows = list(_csv.reader(_io.StringIO(text), delimiter=delimiter))
+    if not rows:
+        return result
+
+    # ── Find header row ───────────────────────────────────────────────────────
+    header_idx = 0
+    header: list[str] = []
+    for i, row in enumerate(rows[:15]):
+        row_lower = [str(c).lower().strip() for c in row]
+        joined = ' '.join(row_lower)
+        if any(k in joined for k in ['date', 'description', 'amount', 'debit',
+                                      'credit', 'narr', 'particular']):
+            header = row_lower
+            header_idx = i
+            break
+
+    if not header:
+        header = [str(c).lower().strip() for c in rows[0]]
+        header_idx = 0
+
+    # ── Column index resolution ───────────────────────────────────────────────
+    def _col(*keywords: str) -> int | None:
+        for kw in keywords:
+            for i, h in enumerate(header):
+                if kw in h:
+                    return i
+        return None
+
+    date_col   = _col('date')
+    desc_col   = _col('description', 'narration', 'particular', 'detail',
+                       'transaction', 'memo', 'narrative', 'reference')
+    debit_col  = _col('debit', 'withdrawal', 'withdraw', 'payment out')
+    credit_col = _col('credit', 'deposit', 'payment in', 'receipt')
+    # "Amount" column only if no separate debit/credit columns
+    amount_col: int | None = None
+    if debit_col is None and credit_col is None:
+        amount_col = _col('amount', 'amt', 'value')
+
+    # Fallback: assume col 1 is description if nothing found
+    if desc_col is None and len(header) >= 2:
+        desc_col = 1
+
+    if desc_col is None:
+        return result   # cannot parse without a description column
+
+    # ── Parse rows ────────────────────────────────────────────────────────────
+    transactions: list[dict] = []
+    all_date_strs: list[str] = []
+
+    _skip_descs = re.compile(
+        r'^(opening\s+balance|closing\s+balance|available\s+balance|'
+        r'total\s+credits|total\s+debits|brought\s+forward|carried\s+forward)',
+        re.IGNORECASE
+    )
+
+    for row in rows[header_idx + 1:]:
+        if not row:
+            continue
+        # Safe column access
+        def _get(idx: int | None) -> str:
+            return str(row[idx]).strip() if idx is not None and idx < len(row) else ''
+
+        desc = _get(desc_col)
+        if not desc or desc.lower() in ('', 'none', 'nan') or _skip_descs.match(desc):
+            continue
+
+        # Amount resolution
+        amount, t_type = 0.0, 'debit'
+        if debit_col is not None and credit_col is not None:
+            d = _parse_amount(_get(debit_col))
+            c = _parse_amount(_get(credit_col))
+            if c and c > 0:
+                amount, t_type = c, 'credit'
+            elif d and d > 0:
+                amount, t_type = d, 'debit'
+        elif amount_col is not None:
+            raw_amt = _get(amount_col)
+            # Handle "CR" / "DR" suffix common in bank exports
+            t_hint = 'credit' if raw_amt.upper().endswith('CR') else (
+                     'debit'  if raw_amt.upper().endswith('DR') else None)
+            raw_amt = re.sub(r'[CcDdRr]+$', '', raw_amt).strip()
+            v = _parse_amount(raw_amt)
+            if v is not None:
+                amount = abs(v)
+                t_type = t_hint or ('credit' if v >= 0 else 'debit')
+        else:
+            # Try any remaining numeric column
+            for col_idx in range(len(row)):
+                if col_idx in (date_col, desc_col):
+                    continue
+                v = _parse_amount(_get(col_idx))
+                if v is not None and abs(v) > 0:
+                    amount = abs(v)
+                    t_type = 'credit' if v >= 0 else 'debit'
+                    break
+
+        if amount <= 0:
+            continue
+
+        date_str = _get(date_col) if date_col is not None else ''
+        if date_str and date_str not in ('None', 'nan', ''):
+            all_date_strs.append(date_str)
+
+        section, category = _categorize_by_keywords(desc)
+        transactions.append({
+            'date':        date_str,
+            'description': desc,
+            'amount':      round(amount, 2),
+            'type':        t_type,
+            'section':     section,
+            'category':    category,
+        })
+
+    # ── LLM self-learning for Miscellaneous transactions ─────────────────────
+    _seen: set = set()
+    _llm_count = 0
+    for tx in transactions:
+        if tx['category'] != 'Miscellaneous':
+            continue
+        _prefix = tx['description'][:40].lower().strip()
+        if _prefix in _seen:
+            continue
+        _seen.add(_prefix)
+        _llm_result = _llm_categorise(
+            f"Bank {tx['type']} ${tx['amount']:.2f}: {tx['description']}",
+            doc_type='bank'
+        )
+        if _llm_result:
+            _sec, _cat, _kw = _llm_result
+            _save_learned_category(_kw, _sec, _cat, tx['description'])
+            for _tx2 in transactions:
+                if _tx2['description'][:40].lower().strip() == _prefix:
+                    _tx2['section'], _tx2['category'] = _sec, _cat
+            _llm_count += 1
+
+    result['transactions'] = transactions
+    result['llm_count']    = _llm_count
+
+    # ── Period detection ─────────────────────────────────────────────────────
+    for ds in all_date_strs:
+        ym = _detect_year_month(ds)
+        if ym:
+            result['year'], result['month'] = ym
+            break
+    if not (result['year'] and result['month']):
+        ym = _detect_year_month(filename)
+        if ym:
+            result['year'], result['month'] = ym
+
+    # ── Category totals ───────────────────────────────────────────────────────
+    cat_totals: dict[str, dict[str, float]] = {}
+    for tx in transactions:
+        sec, cat = tx['section'], tx['category']
+        amt = tx['amount'] if tx['type'] == 'credit' else -tx['amount']
+        cat_totals.setdefault(sec, {}).setdefault(cat, 0.0)
+        cat_totals[sec][cat] = round(cat_totals[sec][cat] + amt, 2)
+
+    result['categorized'] = cat_totals
+    return result
+
+
+# ── 2c. BANK ↔ DOCUMENT CROSS-CHECK ─────────────────────────────────────────
+def cross_check_bank(bank_result: dict, other_results: list) -> dict:
+    """
+    Reconcile bank statement transactions against other parsed documents.
+
+    Matching rules
+    ──────────────
+    Rent disbursement  — bank CREDIT within ±$1 of a rental statement EFT
+                         in the same or adjacent month → 'rent_match'.
+    Property expense   — bank DEBIT within ±$1 of an invoice/utility/rental
+                         bill amount for the same or adjacent month → 'expense_match'.
+    Unmatched bank     — bank transactions with no match in any parsed doc.
+    Unmatched docs     — rental / invoice / utility entries with no bank match.
+
+    Returns
+    ───────
+    {
+      'rent_matches':    [{'bank': tx, 'doc': result, 'delta': float}, ...],
+      'expense_matches': [{'bank': tx, 'doc': result, 'amount': float,
+                           'category': str}, ...],
+      'unmatched_bank':  [tx, ...],
+      'unmatched_docs':  [{'doc': result, 'amount': float,
+                           'category': str, 'reason': str}, ...],
+      'summary': {'matched': int, 'unmatched_bank': int, 'unmatched_docs': int},
+    }
+    """
+    rent_matches:    list = []
+    expense_matches: list = []
+    unmatched_bank:  list = []
+    unmatched_docs:  list = []
+
+    bank_txns = bank_result.get('transactions', [])
+    bank_yr   = bank_result.get('year')
+    bank_mo   = bank_result.get('month')
+
+    # ── Build lookup structures from other docs ───────────────────────────────
+    # Each entry: (doc, amount, category, matched_flag_ref)
+    doc_items: list[dict] = []
+
+    for doc in other_results:
+        d_yr = doc.get('year')
+        d_mo = doc.get('month')
+        # Only include docs in same or adjacent month
+        if bank_yr and d_yr and bank_mo and d_mo:
+            mo_diff = abs((d_yr * 12 + d_mo) - (bank_yr * 12 + bank_mo))
+            if mo_diff > 1:
+                continue
+
+        dtype = doc.get('type', '')
+
+        if dtype == 'rental':
+            # EFT disbursement: money the agency pays to the owner
+            eft = doc.get('eft', 0.0) or 0.0
+            if eft > 0:
+                doc_items.append({
+                    'doc': doc, 'amount': eft,
+                    'category': 'Rental Income (EFT)', 'match_type': 'rent',
+                    'matched': False,
+                })
+            # Individual bill expenses inside the rental statement
+            for pl_cat, amt in doc.get('pl_items', {}).items():
+                if amt > 0 and pl_cat not in ('Rental Income', 'Management Fees',
+                                               'Cash Received (EFT)'):
+                    doc_items.append({
+                        'doc': doc, 'amount': amt,
+                        'category': pl_cat, 'match_type': 'expense',
+                        'matched': False,
+                    })
+
+        elif dtype in ('utility', 'invoice'):
+            amt = doc.get('amount', 0.0) or 0.0
+            if amt > 0:
+                doc_items.append({
+                    'doc': doc, 'amount': amt,
+                    'category': doc.get('category', doc.get('utility_type',
+                                                             'Miscellaneous')),
+                    'match_type': 'expense',
+                    'matched': False,
+                })
+
+    # ── Match each bank transaction ───────────────────────────────────────────
+    matched_bank_indices: set = set()
+
+    for i, tx in enumerate(bank_txns):
+        tx_amt = tx['amount']
+
+        # Try to match against doc_items
+        best_idx  = None
+        best_delta = float('inf')
+
+        for j, item in enumerate(doc_items):
+            if item['matched']:
+                continue
+            # Rent credits match EFT; expense debits match expense items
+            if item['match_type'] == 'rent'    and tx['type'] != 'credit': continue
+            if item['match_type'] == 'expense' and tx['type'] != 'debit':  continue
+
+            delta = abs(tx_amt - item['amount'])
+            if delta <= 1.00 and delta < best_delta:
+                best_delta = delta
+                best_idx   = j
+
+        if best_idx is not None:
+            item = doc_items[best_idx]
+            item['matched'] = True
+            matched_bank_indices.add(i)
+            if item['match_type'] == 'rent':
+                rent_matches.append({
+                    'bank':     tx,
+                    'doc':      item['doc'],
+                    'delta':    round(best_delta, 2),
+                    'category': item['category'],
+                })
+            else:
+                expense_matches.append({
+                    'bank':     tx,
+                    'doc':      item['doc'],
+                    'amount':   tx_amt,
+                    'delta':    round(best_delta, 2),
+                    'category': item['category'],
+                })
+        else:
+            unmatched_bank.append(tx)
+
+    # ── Unmatched docs ────────────────────────────────────────────────────────
+    for item in doc_items:
+        if not item['matched']:
+            doc = item['doc']
+            unmatched_docs.append({
+                'doc':      doc,
+                'amount':   item['amount'],
+                'category': item['category'],
+                'filename': doc.get('filename', ''),
+                'reason':   'No matching bank transaction found',
+            })
+
+    matched_total = len(rent_matches) + len(expense_matches)
+    return {
+        'rent_matches':    rent_matches,
+        'expense_matches': expense_matches,
+        'unmatched_bank':  unmatched_bank,
+        'unmatched_docs':  unmatched_docs,
+        'summary': {
+            'matched':        matched_total,
+            'unmatched_bank': len(unmatched_bank),
+            'unmatched_docs': len(unmatched_docs),
+        },
+    }
 
 
 # ── 3. UTILITY BILL ───────────────────────────────────────────────────────────
@@ -1680,6 +2116,21 @@ def parse_invoice(file_bytes: bytes, filename: str = '') -> dict:
 
 
 # ── AUTO-DETECT & DISPATCH ────────────────────────────────────────────────────
+def parse_document(file_bytes: bytes, filename: str = '',
+                   doc_type: str = 'auto') -> dict:
+    """
+    Unified entry point — handles both PDF and CSV bank statements.
+    Routes .csv files directly to parse_bank_csv(); all other files
+    (and explicit doc_type overrides) go through parse_pdf().
+
+    doc_type: 'auto' | 'rental' | 'bank' | 'utility' | 'invoice'
+    """
+    fname_lower = filename.lower()
+    if fname_lower.endswith('.csv') or fname_lower.endswith('.tsv'):
+        return parse_bank_csv(file_bytes, filename)
+    return parse_pdf(file_bytes, filename, doc_type)
+
+
 def parse_pdf(file_bytes: bytes, filename: str = '', doc_type: str = 'auto') -> dict:
     """
     Parse a PDF, auto-detecting or using explicit doc_type.
