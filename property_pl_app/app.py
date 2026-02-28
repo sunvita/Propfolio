@@ -14,6 +14,8 @@ from difflib import SequenceMatcher
 from openpyxl import load_workbook
 
 from parsers.pdf_parser import parse_pdf
+import parsers.pdf_parser as _pdf_parser_module
+_PARSER_VERSION = getattr(_pdf_parser_module, '__doc__', '').split('Parser version:')[-1].strip().split('\n')[0].strip() if 'Parser version:' in (getattr(_pdf_parser_module, '__doc__', '') or '') else 'unknown'
 from generators.excel_gen import build_workbook
 
 # ── Helper functions (defined before UI blocks) ────────────────────────────────
@@ -561,6 +563,7 @@ with st.sidebar:
             st.markdown(f"○ {s}")
 
     st.markdown("---")
+    st.caption(f"Parser v{_PARSER_VERSION}")
     if st.button("🔄 Start Over", use_container_width=True):
         for k in ['step', 'properties', 'parsed_results',
                   'session_loaded', 'merge_change_log',
