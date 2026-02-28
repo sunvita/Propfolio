@@ -149,6 +149,26 @@ def _session_from_json(raw: dict) -> tuple[bool, str]:
         st.session_state.session_loaded = True
         st.session_state.merge_change_log = []
 
+        # Populate _setup_cfg so Step 1 widgets restore correctly on return
+        _pcs = raw.get('prop_configs', [])
+        st.session_state['_setup_cfg'] = {
+            'n_props':  len(props),
+            'fy_start': raw.get('fy_start_month', 7),
+            'fy_first': int(raw['fy_labels'][-1].split('-')[0]) if raw.get('fy_labels') else 2024,
+            'fy_last':  int(raw['fy_labels'][0].split('-')[0])  if raw.get('fy_labels') else 2029,
+            'props': [
+                {
+                    'name': pc.get('name', f"IP#{i+1} — Property Name"),
+                    'addr': pc.get('address', ''),
+                    'pc':   pc.get('postcode', ''),
+                    'pp':   float(pc.get('purchase_price') or 0),
+                    'cv':   float(pc.get('current_value')  or 0),
+                    'mg':   float(pc.get('mortgage')       or 0),
+                }
+                for i, pc in enumerate(_pcs)
+            ],
+        }
+
         n_props  = len(props)
         n_months = sum(len(p['data']) for p in props)
         return True, (f"Session restored: {n_props} properties, "
@@ -333,6 +353,27 @@ def _session_from_excel(parsed: dict) -> tuple[bool, str]:
         st.session_state.properties      = parsed['properties']
         st.session_state.session_loaded  = True
         st.session_state.merge_change_log = []
+
+        # Populate _setup_cfg so Step 1 widgets restore correctly on return
+        _pcs  = parsed.get('prop_configs', [])
+        _lbls = parsed.get('fy_labels', [])
+        st.session_state['_setup_cfg'] = {
+            'n_props':  len(parsed['properties']),
+            'fy_start': parsed.get('fy_start_month', 7),
+            'fy_first': int(_lbls[-1].split('-')[0]) if _lbls else 2024,
+            'fy_last':  int(_lbls[0].split('-')[0])  if _lbls else 2029,
+            'props': [
+                {
+                    'name': pc.get('name', f"IP#{i+1} — Property Name"),
+                    'addr': pc.get('address', ''),
+                    'pc':   pc.get('postcode', ''),
+                    'pp':   float(pc.get('purchase_price') or 0),
+                    'cv':   float(pc.get('current_value')  or 0),
+                    'mg':   float(pc.get('mortgage')       or 0),
+                }
+                for i, pc in enumerate(_pcs)
+            ],
+        }
         return True, "OK"
     except Exception as e:
         return False, str(e)
@@ -857,18 +898,40 @@ elif st.session_state.step == 1:
     st.markdown('<div class="step-badge">STEP 1 of 4</div>', unsafe_allow_html=True)
     st.markdown("### Property Setup")
 
-    # ── Initialise session-state defaults ONCE (never overwrite existing values) ─
-    # Pattern: set default BEFORE the widget; widget then owns the value via key=.
-    # Do NOT also pass index=/value= — that causes Streamlit to reset the widget
-    # to the computed default on every re-render, defeating the key= persistence.
-    if 'setup_n_props'  not in st.session_state:
-        st.session_state['setup_n_props']  = 1
+    # ── Restore widget keys pruned by Streamlit ≥1.32 ────────────────────────
+    # Streamlit prunes widget session-state keys when the widget is NOT rendered
+    # (i.e. the user is on a different step).  On return to Step 1, every
+    # setup_* and name_* / addr_* / pp_* key has been deleted.
+    # Fix: always save a _setup_cfg snapshot when navigating away, and restore
+    # from it here before the widgets render.  The snapshot is a plain dict —
+    # not owned by any widget — so Streamlit never prunes it.
+    _cfg = st.session_state.get('_setup_cfg', {})
+
+    if 'setup_n_props' not in st.session_state:
+        st.session_state['setup_n_props']  = _cfg.get('n_props',  1)
     if 'setup_fy_start' not in st.session_state:
-        st.session_state['setup_fy_start'] = list(MONTH_NAMES.keys())[6]   # July
+        st.session_state['setup_fy_start'] = _cfg.get('fy_start', list(MONTH_NAMES.keys())[6])
     if 'setup_fy_first' not in st.session_state:
-        st.session_state['setup_fy_first'] = 2024
+        st.session_state['setup_fy_first'] = _cfg.get('fy_first', 2024)
     if 'setup_fy_last'  not in st.session_state:
-        st.session_state['setup_fy_last']  = 2029
+        st.session_state['setup_fy_last']  = _cfg.get('fy_last',  2029)
+
+    # Restore per-property field keys (also pruned when not on Step 1)
+    for _i in range(st.session_state['setup_n_props']):
+        _p = _cfg.get('props', [{}] * 10)
+        _pd = _p[_i] if _i < len(_p) else {}
+        if f'name_{_i}' not in st.session_state:
+            st.session_state[f'name_{_i}'] = _pd.get('name', f"IP#{_i+1} — Property Name")
+        if f'addr_{_i}' not in st.session_state:
+            st.session_state[f'addr_{_i}'] = _pd.get('addr', '')
+        if f'pc_{_i}'   not in st.session_state:
+            st.session_state[f'pc_{_i}']   = _pd.get('pc',   '')
+        if f'pp_{_i}'   not in st.session_state:
+            st.session_state[f'pp_{_i}']   = _pd.get('pp',   0.0)
+        if f'cv_{_i}'   not in st.session_state:
+            st.session_state[f'cv_{_i}']   = _pd.get('cv',   0.0)
+        if f'mg_{_i}'   not in st.session_state:
+            st.session_state[f'mg_{_i}']   = _pd.get('mg',   0.0)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -924,17 +987,6 @@ elif st.session_state.step == 1:
 
     st.markdown("---")
     st.markdown("### Property Details")
-
-    # ── Initialise per-property field defaults once (never overwrite user input) ─
-    for _i in range(n_props):
-        if f'name_{_i}' not in st.session_state:
-            st.session_state[f'name_{_i}'] = f"IP#{_i+1} — Property Name"
-        if f'pp_{_i}' not in st.session_state:
-            st.session_state[f'pp_{_i}'] = 0.0
-        if f'cv_{_i}' not in st.session_state:
-            st.session_state[f'cv_{_i}'] = 0.0
-        if f'mg_{_i}' not in st.session_state:
-            st.session_state[f'mg_{_i}'] = 0.0
 
     prop_configs = []
     for i in range(n_props):
@@ -1001,6 +1053,27 @@ elif st.session_state.step == 1:
         st.session_state.prop_configs   = prop_configs
         # Reset confirmation checkbox for next time
         st.session_state.pop('confirm_prop_drop', None)
+
+        # ── Snapshot all Step 1 values into a plain (non-widget) dict ──────
+        # Streamlit ≥1.32 prunes widget keys when the widget is not rendered.
+        # Saving to _setup_cfg ensures values survive navigation to other steps.
+        st.session_state['_setup_cfg'] = {
+            'n_props':  int(n_props),
+            'fy_start': fy_start,
+            'fy_first': int(fy_first),
+            'fy_last':  int(fy_last),
+            'props': [
+                {
+                    'name': st.session_state.get(f'name_{i}', f'IP#{i+1} — Property Name'),
+                    'addr': st.session_state.get(f'addr_{i}', ''),
+                    'pc':   st.session_state.get(f'pc_{i}',   ''),
+                    'pp':   float(st.session_state.get(f'pp_{i}', 0.0)),
+                    'cv':   float(st.session_state.get(f'cv_{i}', 0.0)),
+                    'mg':   float(st.session_state.get(f'mg_{i}', 0.0)),
+                }
+                for i in range(int(n_props))
+            ],
+        }
 
         # ── Preserve existing P&L data when returning to Setup ─────────────
         # Map tab → existing property entry (preserves months of parsed data)
