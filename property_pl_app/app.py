@@ -1664,6 +1664,118 @@ elif st.session_state.step == 3:
                         for period_str, val in zip(all_periods, row_vals):
                             prop_data.setdefault(period_str, {})[str(item_name)] = float(val) if val else 0.0
 
+        # ── Fixed / Recurring Expense entry ──────────────────────────────────
+        with st.expander(f"⚡ Add Fixed / Recurring Expense — {prop['name']}"):
+            st.markdown(
+                '<div class="info-box">💡 Add any expense not captured in a PDF — '
+                'e.g. Internet, Insurance, Council Rates. '
+                'Set a start month and optionally spread it across multiple months.</div>',
+                unsafe_allow_html=True
+            )
+
+            _fe_col1, _fe_col2 = st.columns([2, 1])
+            _fe_cat = _fe_col1.selectbox(
+                "Category", PL_ITEMS,
+                index=PL_ITEMS.index('Internet'),
+                key=f"fe_cat_{prop['tab']}"
+            )
+            _fe_amt = _fe_col2.number_input(
+                "Amount ($)", min_value=0.0, value=0.0, step=1.0,
+                key=f"fe_amt_{prop['tab']}"
+            )
+
+            _fe_col3, _fe_col4 = st.columns(2)
+            _fe_yr = _fe_col3.number_input(
+                "Start Year", 2018, 2035, 2025, key=f"fe_yr_{prop['tab']}"
+            )
+            _fe_mo = _fe_col4.selectbox(
+                "Start Month", list(MONTH_NAMES.keys()),
+                format_func=lambda x: MONTH_NAMES[x],
+                key=f"fe_mo_{prop['tab']}"
+            )
+
+            _fe_recurring = st.toggle(
+                "🔁 Recurring — apply to multiple months",
+                key=f"fe_rec_{prop['tab']}"
+            )
+
+            _fe_n = 1
+            _fe_mode = 'A'
+            if _fe_recurring:
+                _fe_mode_raw = st.radio(
+                    "Recurrence type",
+                    [
+                        "(A)  Same amount each month  (e.g. Internet $89 × 12)",
+                        "(B)  Annual total ÷ N months  (e.g. Insurance $1,200 ÷ 12)",
+                    ],
+                    key=f"fe_mode_{prop['tab']}",
+                    horizontal=False,
+                )
+                _fe_mode = 'A' if _fe_mode_raw.startswith('(A)') else 'B'
+                _fe_n = st.number_input(
+                    "Number of months", min_value=1, max_value=60, value=12,
+                    key=f"fe_n_{prop['tab']}"
+                )
+
+            # Live preview
+            if _fe_amt > 0:
+                if _fe_recurring:
+                    if _fe_mode == 'A':
+                        _per_mo = _fe_amt
+                        _total  = round(_fe_amt * _fe_n, 2)
+                    else:
+                        _per_mo = round(_fe_amt / _fe_n, 2)
+                        _total  = _fe_amt
+                    st.caption(
+                        f"📌 Preview: {_fe_n} months × ${_per_mo:,.2f}/month "
+                        f"= **${_total:,.2f} total**"
+                    )
+                else:
+                    st.caption(
+                        f"📌 Preview: ${_fe_amt:,.2f} → "
+                        f"{MONTH_NAMES[_fe_mo]} {_fe_yr} only"
+                    )
+
+            if st.button("✚ Apply", key=f"fe_add_{prop['tab']}", type="primary"):
+                if _fe_amt <= 0:
+                    st.warning("Please enter an amount greater than zero.")
+                else:
+                    # Build list of (year, month) to fill
+                    _months_list, _yr, _mo = [], _fe_yr, _fe_mo
+                    for _ in range(_fe_n if _fe_recurring else 1):
+                        _months_list.append((_yr, _mo))
+                        _mo += 1
+                        if _mo > 12:
+                            _mo, _yr = 1, _yr + 1
+
+                    # Per-month value
+                    _n_total = len(_months_list)
+                    if _fe_recurring and _fe_mode == 'B':
+                        _pv      = round(_fe_amt / _n_total, 2)
+                        _last_pv = round(_fe_amt - _pv * (_n_total - 1), 2)
+                    else:
+                        _pv = _last_pv = _fe_amt
+
+                    for _i, (_y, _m) in enumerate(_months_list):
+                        _val = _last_pv if _i == _n_total - 1 else _pv
+                        prop['data'].setdefault((_y, _m), {})[_fe_cat] = _val
+
+                    _done_mo = MONTH_NAMES[_months_list[0][1]]
+                    _done_yr = _months_list[0][0]
+                    _last_mo = MONTH_NAMES[_months_list[-1][1]]
+                    _last_yr = _months_list[-1][0]
+                    if _n_total == 1:
+                        st.success(
+                            f"✅ Added **{_fe_cat}** ${_fe_amt:,.2f} "
+                            f"→ {_done_mo} {_done_yr}"
+                        )
+                    else:
+                        st.success(
+                            f"✅ Added **{_fe_cat}** across {_n_total} months "
+                            f"({_done_mo} {_done_yr} → {_last_mo} {_last_yr})"
+                        )
+                    st.rerun()
+
         # Manual entry for a new month
         with st.expander(f"➕ Add / edit a month manually for {prop['name']}"):
             c1, c2 = st.columns(2)
