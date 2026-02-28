@@ -9,7 +9,9 @@ from io import BytesIO
 import json
 import re
 import datetime
+import calendar
 from difflib import SequenceMatcher
+from openpyxl import load_workbook
 
 from parsers.pdf_parser import parse_pdf
 from generators.excel_gen import build_workbook
@@ -151,6 +153,187 @@ def _session_from_json(raw: dict) -> tuple[bool, str]:
                       f"{n_months} months of data (saved {raw.get('saved_at','?')})")
     except Exception as e:
         return False, f"Failed to load session: {e}"
+
+
+def _parse_excel_to_session(xlsx_bytes: bytes) -> tuple[bool, str, dict]:
+    """
+    Reverse-convert a Propfolio-generated Excel workbook back to session dict.
+    Returns (success, message, session_dict).
+
+    Extracts:
+      - Property names & tabs (from sheet names)
+      - Monthly P&L data (from each property tab)
+      - FY start month (from first monthly column header)
+      - FY labels (from FY Total column headers)
+      - Purchase info: address, purchase_price, purchase_date,
+        current_value, mortgage (from Summary tab TABLE B)
+    """
+    try:
+        wb = load_workbook(filename=BytesIO(xlsx_bytes), data_only=True)
+
+        # Known item-level row labels (excludes section/total/kpi headers)
+        ITEM_LABELS = {
+            'Rental Income', 'Other Income', 'Excess Bill Shares',
+            'Management Fees', 'Letting Fees', 'Council Rates', 'Land Tax',
+            'Strata / Body Corporate', 'Building Insurance',
+            'Maintenance & Repairs', 'Cleaning', 'Advertising', 'Miscellaneous',
+            'Electricity', 'Water', 'Gas', 'Internet',
+            'Mortgage Interest',
+            'Cash Received (EFT)', 'Less: Utilities Paid',
+            'Less: Mortgage Repayment', 'Principal Repaid',
+        }
+        MO_ABBR = {v: k for k, v in enumerate(calendar.month_abbr) if v}
+
+        prop_tabs = [s for s in wb.sheetnames if s != 'Summary']
+        if not prop_tabs:
+            return False, "No property tabs found in Excel.", {}
+
+        properties    = []
+        fy_labels     = []
+        fy_start_month = None
+
+        # ── Parse each property tab ────────────────────────────────────────────
+        for tab_name in prop_tabs:
+            ws = wb[tab_name]
+
+            # Row 1 = property display name (merged cell)
+            prop_name = ws.cell(1, 1).value or tab_name
+            prop_name = str(prop_name).strip()
+
+            # Row 4 = column headers → build col_map: col_idx → (year, month)
+            col_map     = {}   # col_idx → (year, month)
+            fy_seen     = []   # fy labels in order
+            fy_mo_cols  = {}   # fy_label → list of month col indices (in order)
+            cur_fy      = None
+
+            for ci in range(2, (ws.max_column or 60) + 1):
+                h = ws.cell(4, ci).value
+                if h is None:
+                    continue
+                h_str = str(h).strip().replace('\n', ' ')
+
+                # FY Total header e.g. "FY 2024-25 Total"
+                fy_m = re.match(r'FY\s+(\d{4}-\d{2})', h_str)
+                if fy_m:
+                    cur_fy = fy_m.group(1)
+                    if cur_fy not in fy_seen:
+                        fy_seen.append(cur_fy)
+                        fy_mo_cols[cur_fy] = []
+                    continue
+
+                # Monthly header e.g. "Jun-25"
+                mo_m = re.match(r'([A-Za-z]{3})-(\d{2})$', h_str)
+                if mo_m and cur_fy:
+                    mo_name = mo_m.group(1).capitalize()
+                    mo_num  = MO_ABBR.get(mo_name)
+                    yr      = 2000 + int(mo_m.group(2))
+                    if mo_num:
+                        col_map[ci] = (yr, mo_num)
+                        fy_mo_cols[cur_fy].append(ci)
+
+            # FY labels (newest → oldest, same order as Excel columns)
+            if not fy_labels and fy_seen:
+                fy_labels = fy_seen
+
+            # FY start month = last monthly col in any FY block (oldest month)
+            if fy_start_month is None:
+                for fy_lbl, mo_cols in fy_mo_cols.items():
+                    if mo_cols:
+                        last_col = mo_cols[-1]
+                        fy_start_month = col_map[last_col][1]
+                        break
+
+            # Read P&L item rows
+            prop_data: dict[tuple, dict] = {}
+            for ri in range(5, (ws.max_row or 60) + 1):
+                label = ws.cell(ri, 1).value
+                if not label:
+                    continue
+                label = str(label).strip()
+                if label not in ITEM_LABELS:
+                    continue
+                for ci, (yr, mo) in col_map.items():
+                    val = ws.cell(ri, ci).value
+                    if val is not None and isinstance(val, (int, float)) and val != 0:
+                        key = (yr, mo)
+                        prop_data.setdefault(key, {})[label] = round(float(val), 2)
+
+            properties.append({
+                'name': prop_name,
+                'tab':  tab_name,
+                'data': prop_data,
+            })
+
+        # ── Parse Summary tab for purchase_info ───────────────────────────────
+        purchase_info: dict[str, dict] = {}
+        name_to_tab   = {p['name']: p['tab'] for p in properties}
+
+        if 'Summary' in wb.sheetnames:
+            ws_s = wb['Summary']
+            for ri in range(1, (ws_s.max_row or 100) + 1):
+                cell_a = ws_s.cell(ri, 1).value
+                if not cell_a:
+                    continue
+                cell_a_str = str(cell_a).strip()
+                # Match by display name or tab name
+                tab = name_to_tab.get(cell_a_str) or (
+                    cell_a_str if cell_a_str in prop_tabs else None
+                )
+                if tab:
+                    raw_date = ws_s.cell(ri, 4).value
+                    if isinstance(raw_date, datetime.datetime):
+                        date_str = raw_date.strftime('%Y-%m-%d')
+                    else:
+                        date_str = str(raw_date) if raw_date else ''
+                    purchase_info[tab] = {
+                        'address':        str(ws_s.cell(ri, 2).value or '').strip(),
+                        'purchase_price': ws_s.cell(ri, 3).value,
+                        'purchase_date':  date_str,
+                        'current_value':  ws_s.cell(ri, 5).value,
+                        'mortgage':       ws_s.cell(ri, 6).value,
+                    }
+
+        # ── Build prop_configs ─────────────────────────────────────────────────
+        prop_configs = [
+            {
+                'name':    p['name'],
+                'tab':     p['tab'],
+                'address': purchase_info.get(p['tab'], {}).get('address', ''),
+            }
+            for p in properties
+        ]
+
+        n_months = sum(len(p['data']) for p in properties)
+        msg = (f"Restored {len(properties)} propert{'y' if len(properties)==1 else 'ies'}, "
+               f"{n_months} months of data. "
+               f"FY start: {calendar.month_name[fy_start_month or 7]}, "
+               f"FY range: {fy_labels[-1] if fy_labels else '?'} → {fy_labels[0] if fy_labels else '?'}")
+
+        return True, msg, {
+            'fy_start_month': fy_start_month or 7,
+            'fy_labels':      fy_labels,
+            'prop_configs':   prop_configs,
+            'purchase_info':  purchase_info,
+            'properties':     properties,
+        }
+
+    except Exception as e:
+        return False, f"Failed to parse Excel: {e}", {}
+
+
+def _session_from_excel(parsed: dict) -> tuple[bool, str]:
+    """Apply parsed Excel data to session state (mirrors _session_from_json)."""
+    try:
+        st.session_state.fy_start_month  = parsed['fy_start_month']
+        st.session_state.fy_labels       = parsed['fy_labels']
+        st.session_state.prop_configs    = parsed['prop_configs']
+        st.session_state.purchase_info   = parsed['purchase_info']
+        st.session_state.properties      = parsed['properties']
+        st.session_state.session_loaded  = True
+        st.session_state.merge_change_log = []
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
 
 
 def _merge_parsed_to_properties():
@@ -470,6 +653,21 @@ The app will automatically:
 After generating, download the updated Session JSON to replace your previous one.
 """)
 
+        st.markdown(
+            '<div class="warn-box">'
+            '<b>📊 Have an Excel but no Session JSON?</b>'
+            '</div>', unsafe_allow_html=True)
+        st.markdown("""
+If you generated a Propfolio Excel in a previous session but forgot to download the Session JSON, you can fully restore your data directly from the Excel file.
+
+On the **Setup** page, open **"Restore from Excel"** and upload your workbook. The app reads:
+- All monthly P&L figures from each property tab
+- FY start month and FY range from the column headers
+- Address, purchase price, purchase date, current value, and mortgage from the Summary tab
+
+Once restored, go to **Upload PDFs** to add new months, or **Review & Edit** to check the data first. From that point on, remember to always download the **Session JSON** alongside your Excel.
+""")
+
     with right:
         st.markdown("### Supported PDF types")
         st.markdown(
@@ -572,6 +770,60 @@ elif st.session_state.step == 1:
                     st.error(msg)
             except Exception as e:
                 st.error(f"Could not read JSON file: {e}")
+
+    # ── Excel → Session restore (no JSON saved) ────────────────────────────────
+    with st.expander("📊 Restore from Excel (no JSON available)", expanded=False):
+        st.markdown(
+            '<div class="info-box">💡 <b>No Session JSON?</b> If you have a Propfolio-generated '
+            'Excel workbook but forgot to save the session JSON, upload the Excel here. '
+            'The app will automatically restore all property data, FY settings, '
+            'purchase information, and monthly P&L figures from the workbook.'
+            '</div>', unsafe_allow_html=True
+        )
+        excel_file = st.file_uploader(
+            "Upload Propfolio Excel workbook", type=['xlsx'], key='excel_restore_uploader',
+            label_visibility='collapsed',
+        )
+        if excel_file:
+            with st.spinner("Reading Excel workbook…"):
+                ok, msg, parsed = _parse_excel_to_session(excel_file.read())
+            if ok:
+                st.success(f"✅ {msg}")
+
+                # Preview what was found
+                n_p = len(parsed.get('properties', []))
+                pinfo = parsed.get('purchase_info', {})
+                previews = []
+                for p in parsed.get('properties', []):
+                    tab   = p['tab']
+                    addr  = pinfo.get(tab, {}).get('address', '—')
+                    n_mo  = len(p['data'])
+                    previews.append(f"**{p['name']}** · {addr} · {n_mo} months")
+                if previews:
+                    st.markdown('\n\n'.join(previews))
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("✅ Restore & continue adding PDFs →",
+                                 type="primary", use_container_width=True,
+                                 key="excel_restore_confirm"):
+                        _session_from_excel(parsed)
+                        st.session_state.step = 2
+                        st.rerun()
+                with col_b:
+                    if st.button("👁 Restore & review data first →",
+                                 use_container_width=True,
+                                 key="excel_restore_review"):
+                        _session_from_excel(parsed)
+                        st.session_state.step = 3
+                        st.rerun()
+            else:
+                st.error(f"❌ {msg}")
+                st.markdown(
+                    '<div class="warn-box">⚠️ Make sure you\'re uploading a Propfolio-generated '
+                    'Excel file. Manually-created workbooks with different column structures '
+                    'may not parse correctly.</div>', unsafe_allow_html=True
+                )
 
     st.markdown('<div class="step-badge">STEP 1 of 4</div>', unsafe_allow_html=True)
     st.markdown("### Property Setup")
