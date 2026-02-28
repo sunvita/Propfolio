@@ -380,6 +380,11 @@ def _merge_parsed_to_properties():
                 'Management Fees':     result.get('money_out', 0),
                 'Cash Received (EFT)': result.get('eft',       0),
             }
+            # Merge itemised bill expenses extracted from the statement
+            # (e.g. Maintenance & Repairs, Cleaning, Council Rates, etc.)
+            for _pl_cat, _amt in result.get('pl_items', {}).items():
+                if _pl_cat not in new_items and _amt > 0:
+                    new_items[_pl_cat] = _amt
         elif result['type'] == 'bank':
             for _sec, cats in result.get('categorized', {}).items():
                 for cat, amt in cats.items():
@@ -1113,6 +1118,14 @@ elif st.session_state.step == 2:
                     c1.metric("Money In",  f"${result.get('money_in', 0):,.2f}")
                     c2.metric("Money Out", f"${result.get('money_out', 0):,.2f}")
                     c3.metric("EFT",       f"${result.get('eft', 0):,.2f}")
+                    # Parse-source badge
+                    _src = result.get('parse_source', 'regex')
+                    if _src == 'llm':
+                        st.info("🤖 Values extracted by AI (Tier C) — please verify before saving.")
+                    elif _src == 'table':
+                        st.info("📋 Values extracted from table structure (Tier B).")
+                    elif _src == 'failed':
+                        st.warning("⚠️ Could not extract values automatically. Please enter them manually below.")
                     if result.get('rooms'):
                         st.dataframe(
                             pd.DataFrame(result['rooms']).T.rename(

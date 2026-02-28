@@ -20,29 +20,159 @@ BANK_CATEGORIES = {
     'eft to owner':         ('income',    'Rental Income'),
     'disbursement':         ('income',    'Rental Income'),
 
-    # ── OpEx ─────────────────────────────────────────────────────────────────
+    # ── OpEx — Management ─────────────────────────────────────────────────────
     'management fee':       ('opex',      'Management Fees'),
     'property management':  ('opex',      'Management Fees'),
+    'admin fee':            ('opex',      'Management Fees'),
+    'administration fee':   ('opex',      'Management Fees'),
     'letting fee':          ('opex',      'Letting Fees'),
     'leasing fee':          ('opex',      'Letting Fees'),
+    'lease renewal':        ('opex',      'Letting Fees'),
+    'tenant placement':     ('opex',      'Letting Fees'),
+    'reletting':            ('opex',      'Letting Fees'),
+
+    # ── OpEx — Maintenance & Repairs ─────────────────────────────────────────
     'maintenance':          ('opex',      'Maintenance & Repairs'),
     'repair':               ('opex',      'Maintenance & Repairs'),
     'handyman':             ('opex',      'Maintenance & Repairs'),
+    'trade service':        ('opex',      'Maintenance & Repairs'),
+    # Plumbing
     'plumber':              ('opex',      'Maintenance & Repairs'),
-    'electrician':          ('opex',      'Maintenance & Repairs'),
-    'locksmith':            ('opex',      'Maintenance & Repairs'),
-    'pest control':         ('opex',      'Maintenance & Repairs'),
-    'roofing':              ('opex',      'Maintenance & Repairs'),
-    'gutters':              ('opex',      'Maintenance & Repairs'),
-    'air conditioning':     ('opex',      'Maintenance & Repairs'),
+    'plumbing':             ('opex',      'Maintenance & Repairs'),
+    'drain':                ('opex',      'Maintenance & Repairs'),
+    'blocked drain':        ('opex',      'Maintenance & Repairs'),
+    'tap ':                 ('opex',      'Maintenance & Repairs'),
+    'taps ':                ('opex',      'Maintenance & Repairs'),
+    'toilet':               ('opex',      'Maintenance & Repairs'),
+    'cistern':              ('opex',      'Maintenance & Repairs'),
+    'pipe ':                ('opex',      'Maintenance & Repairs'),
+    'pipes ':               ('opex',      'Maintenance & Repairs'),
     'hot water':            ('opex',      'Maintenance & Repairs'),
+    'water heater':         ('opex',      'Maintenance & Repairs'),
+    # Electrical
+    'electrical':           ('opex',      'Maintenance & Repairs'),
+    'electrician':          ('opex',      'Maintenance & Repairs'),
+    'wiring':               ('opex',      'Maintenance & Repairs'),
+    'switchboard':          ('opex',      'Maintenance & Repairs'),
+    'light fitting':        ('opex',      'Maintenance & Repairs'),
+    'smoke alarm':          ('opex',      'Maintenance & Repairs'),
+    'safety switch':        ('opex',      'Maintenance & Repairs'),
+    'power point':          ('opex',      'Maintenance & Repairs'),
+    # Locks & access
+    'locksmith':            ('opex',      'Maintenance & Repairs'),
+    'lock ':                ('opex',      'Maintenance & Repairs'),
+    'locks ':               ('opex',      'Maintenance & Repairs'),
+    'keys ':                ('opex',      'Maintenance & Repairs'),
+    'key cutting':          ('opex',      'Maintenance & Repairs'),
+    'access card':          ('opex',      'Maintenance & Repairs'),
+    'deadbolt':             ('opex',      'Maintenance & Repairs'),
+    'door handle':          ('opex',      'Maintenance & Repairs'),
+    # Pest & vermin
+    'pest control':         ('opex',      'Maintenance & Repairs'),
+    'termite':              ('opex',      'Maintenance & Repairs'),
+    'vermin':               ('opex',      'Maintenance & Repairs'),
+    'rodent':               ('opex',      'Maintenance & Repairs'),
+    'cockroach':            ('opex',      'Maintenance & Repairs'),
+    # Roofing & structure
+    'roofing':              ('opex',      'Maintenance & Repairs'),
+    'roof repair':          ('opex',      'Maintenance & Repairs'),
+    'gutters':              ('opex',      'Maintenance & Repairs'),
+    'gutter clean':         ('opex',      'Maintenance & Repairs'),
+    'downpipe':             ('opex',      'Maintenance & Repairs'),
+    'fascia':               ('opex',      'Maintenance & Repairs'),
+    'ceiling':              ('opex',      'Maintenance & Repairs'),
+    'wall repair':          ('opex',      'Maintenance & Repairs'),
+    'plaster':              ('opex',      'Maintenance & Repairs'),
+    'rendering':            ('opex',      'Maintenance & Repairs'),
+    'waterproofing':        ('opex',      'Maintenance & Repairs'),
+    # Flooring
     'carpet':               ('opex',      'Maintenance & Repairs'),
+    'flooring':             ('opex',      'Maintenance & Repairs'),
+    'tiling':               ('opex',      'Maintenance & Repairs'),
+    'tile ':                ('opex',      'Maintenance & Repairs'),
+    'tiles ':               ('opex',      'Maintenance & Repairs'),
+    'grout':                ('opex',      'Maintenance & Repairs'),
+    'floorboard':           ('opex',      'Maintenance & Repairs'),
+    'vinyl':                ('opex',      'Maintenance & Repairs'),
+    # Painting & cosmetic
     'painting':             ('opex',      'Maintenance & Repairs'),
+    'painter':              ('opex',      'Maintenance & Repairs'),
+    'touch up':             ('opex',      'Maintenance & Repairs'),
+    'patching':             ('opex',      'Maintenance & Repairs'),
+    # Doors, windows & glazing
+    'glazier':              ('opex',      'Maintenance & Repairs'),
+    'window repair':        ('opex',      'Maintenance & Repairs'),
+    'glass repair':         ('opex',      'Maintenance & Repairs'),
+    'screen repair':        ('opex',      'Maintenance & Repairs'),
+    'door repair':          ('opex',      'Maintenance & Repairs'),
+    'roller door':          ('opex',      'Maintenance & Repairs'),
+    'garage door':          ('opex',      'Maintenance & Repairs'),
+    # HVAC & appliances
+    'air conditioning':     ('opex',      'Maintenance & Repairs'),
+    'air con':              ('opex',      'Maintenance & Repairs'),
+    'aircon':               ('opex',      'Maintenance & Repairs'),
+    'hvac':                 ('opex',      'Maintenance & Repairs'),
+    'split system':         ('opex',      'Maintenance & Repairs'),
+    'ducted':               ('opex',      'Maintenance & Repairs'),
+    'appliance':            ('opex',      'Maintenance & Repairs'),
+    'oven repair':          ('opex',      'Maintenance & Repairs'),
+    'dishwasher repair':    ('opex',      'Maintenance & Repairs'),
+    'washing machine':      ('opex',      'Maintenance & Repairs'),
+    'rangehood':            ('opex',      'Maintenance & Repairs'),
+    # Fencing, gates & external
+    'fencing':              ('opex',      'Maintenance & Repairs'),
+    'fence repair':         ('opex',      'Maintenance & Repairs'),
+    'gate repair':          ('opex',      'Maintenance & Repairs'),
+    'concreting':           ('opex',      'Maintenance & Repairs'),
+    'driveway':             ('opex',      'Maintenance & Repairs'),
+    'paving':               ('opex',      'Maintenance & Repairs'),
+    'retaining wall':       ('opex',      'Maintenance & Repairs'),
+    'carpentry':            ('opex',      'Maintenance & Repairs'),
+    'carpenter':            ('opex',      'Maintenance & Repairs'),
+    'joinery':              ('opex',      'Maintenance & Repairs'),
+    'cabinet':              ('opex',      'Maintenance & Repairs'),
+    # Pool & spa
+    'pool service':         ('opex',      'Maintenance & Repairs'),
+    'pool repair':          ('opex',      'Maintenance & Repairs'),
+    'spa repair':           ('opex',      'Maintenance & Repairs'),
+    'pool chemical':        ('opex',      'Maintenance & Repairs'),
+
+    # ── OpEx — Cleaning ───────────────────────────────────────────────────────
     'cleaning':             ('opex',      'Cleaning'),
+    'clean ':               ('opex',      'Cleaning'),
+    'cleaner':              ('opex',      'Cleaning'),
     'bond clean':           ('opex',      'Cleaning'),
+    'end of lease':         ('opex',      'Cleaning'),
+    'vacate clean':         ('opex',      'Cleaning'),
+    'exit clean':           ('opex',      'Cleaning'),
+    'move out clean':       ('opex',      'Cleaning'),
+    'pressure wash':        ('opex',      'Cleaning'),
+    'window clean':         ('opex',      'Cleaning'),
+    'carpet clean':         ('opex',      'Cleaning'),
+    'steam clean':          ('opex',      'Cleaning'),
+    'rubbish removal':      ('opex',      'Cleaning'),
+    'waste removal':        ('opex',      'Cleaning'),
+    'junk removal':         ('opex',      'Cleaning'),
+    'skip bin':             ('opex',      'Cleaning'),
+    # Gardening & grounds
     'lawn':                 ('opex',      'Cleaning'),
+    'mowing':               ('opex',      'Cleaning'),
+    'mow ':                 ('opex',      'Cleaning'),
     'garden':               ('opex',      'Cleaning'),
+    'garden maintenance':   ('opex',      'Cleaning'),
+    'gardening':            ('opex',      'Cleaning'),
+    'gardener':             ('opex',      'Cleaning'),
     'landscaping':          ('opex',      'Cleaning'),
+    'landscaper':           ('opex',      'Cleaning'),
+    'hedging':              ('opex',      'Cleaning'),
+    'pruning':              ('opex',      'Cleaning'),
+    'tree lopping':         ('opex',      'Cleaning'),
+    'tree removal':         ('opex',      'Cleaning'),
+    'arborist':             ('opex',      'Cleaning'),
+    'weeding':              ('opex',      'Cleaning'),
+    'mulching':             ('opex',      'Cleaning'),
+    'irrigation':           ('opex',      'Cleaning'),
+    'turf':                 ('opex',      'Cleaning'),
     'council rates':        ('opex',      'Council Rates'),
     'municipal rates':      ('opex',      'Council Rates'),
     'rates notice':         ('opex',      'Council Rates'),
@@ -407,11 +537,14 @@ def _detect_year_month(text: str) -> tuple[int, int] | None:
 
 
 def _categorize_by_keywords(description: str) -> tuple[str, str]:
-    """Return (section, category) by matching BANK_CATEGORIES keywords."""
+    """Return (section, category) by matching BANK_CATEGORIES keywords.
+    Longer (more specific) keywords take priority over shorter ones so that
+    e.g. 'carpet clean' beats 'carpet', and 'garden maintenance' beats 'maintenance'.
+    """
     desc_lower = description.lower()
-    for kw, cat in BANK_CATEGORIES.items():
+    for kw in sorted(BANK_CATEGORIES, key=len, reverse=True):
         if kw in desc_lower:
-            return cat
+            return BANK_CATEGORIES[kw]
     return ('opex', 'Miscellaneous')
 
 
@@ -559,16 +692,69 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
                 if _val is not None and (result[_key] == 0.0 or _key == 'eft'):
                     result[_key] = _val
 
+    # ── Ailo itemised bill extraction ────────────────────────────────────────
+    # Extract individual expense lines ("Category · description $amount") so
+    # each bill appears as its own P&L line item.
+    # Structure:  Income → Mgmt Fees → [bill items by category] → Net = Transfer
+    if _is_ailo:
+        _BILL_SKIP = re.compile(
+            r'^(rent\s+payment|management\s+fees?|paid\s+on|contributions?|'
+            r'failed|transfer\s+to|withdrawal|total|gst|overview|income|expenses)',
+            re.IGNORECASE
+        )
+        # Match:  "[Category] · [details...] $amount" on a single line
+        _bill_pattern = re.compile(
+            r'^([A-Za-z][^\n·]{1,80}?)\s+·\s+[^\n$]*\$([\d,]+\.?\d*)\s*$',
+            re.MULTILINE
+        )
+        _bill_totals: dict[str, float] = {}
+        for _bm in _bill_pattern.finditer(text):
+            _cat_text = _bm.group(1).strip()
+            _amt      = _parse_amount(_bm.group(2)) or 0.0
+            if _amt <= 0 or _BILL_SKIP.match(_cat_text):
+                continue
+            _section, _pl_cat = _categorize_by_keywords(_cat_text)
+            # Only capture opex/utilities — skip income-side matches
+            if _section in ('opex', 'utilities'):
+                _bill_totals[_pl_cat] = round(
+                    _bill_totals.get(_pl_cat, 0.0) + _amt, 2
+                )
+        # Add each bill category to pl_items (skip Mgmt Fees — already in money_out)
+        for _pl_cat, _amt in _bill_totals.items():
+            if _pl_cat != 'Management Fees':
+                result['pl_items'][_pl_cat] = _amt
+
     # ── Room breakdown ───────────────────────────────────────────────────────
-    room_pattern = re.compile(
-        r'(room\s*\d+|unit\s*\w+)[^\d$]*\$?([\d,]+\.?\d*)[^\d$]*\$?([\d,]+\.?\d*)',
-        re.IGNORECASE
-    )
-    for m in room_pattern.finditer(text):
-        room_name = m.group(1).strip().title()
-        rent = _parse_amount(m.group(2)) or 0
-        mgmt = _parse_amount(m.group(3)) or 0
-        result['rooms'][room_name] = {'rent': rent, 'mgmt': mgmt, 'net': round(rent - mgmt, 2)}
+    if _is_ailo:
+        # Ailo: "Room N, [address]  Net income: $X" — reliable, address numbers don't interfere
+        for _rm in re.finditer(
+            r'(Room\s+\d+),\s+[^\n]+?Net income:\s+\$([\d,]+\.?\d*)',
+            text, re.IGNORECASE
+        ):
+            _rname = _rm.group(1).strip().title()
+            _rnet  = _parse_amount(_rm.group(2)) or 0.0
+            result['rooms'][_rname] = {'rent': _rnet, 'mgmt': 0.0, 'net': _rnet}
+    else:
+        # Generic: locate each room/unit heading then find its "Total $out $in" summary
+        # row within the next 600 chars.  This avoids matching address numbers or
+        # per-week rent figures that appear earlier in the room block.
+        for _rm_m in re.finditer(
+            r'(room\s*\d+\b|unit\s*\w+\b)(?!\s*/)', text, re.IGNORECASE
+        ):
+            _rname   = _rm_m.group(1).strip().title()
+            _segment = text[_rm_m.start(): _rm_m.start() + 600]
+            _tot = re.search(
+                r'Total\s+\$([\d,]+\.?\d*)\s+\$([\d,]+\.?\d*)',
+                _segment, re.IGNORECASE
+            )
+            if _tot:
+                # Column order in PropertyMe-style PDFs is Out (fees) then In (rent)
+                _mgmt = _parse_amount(_tot.group(1)) or 0.0
+                _rent = _parse_amount(_tot.group(2)) or 0.0
+                result['rooms'][_rname] = {
+                    'rent': _rent, 'mgmt': _mgmt,
+                    'net':  round(_rent - _mgmt, 2),
+                }
 
     # ── Tier B: table fallback ─────────────────────────────────────────────
     # Trigger when regex extracted nothing meaningful
@@ -603,10 +789,9 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
         else:
             result['parse_source'] = 'failed'
 
-    result['pl_items'] = {
-        'Rental Income':   result['money_in'],
-        'Management Fees': result['money_out'],
-    }
+    # Set base items — bill items extracted earlier in the Ailo branch are preserved
+    result['pl_items']['Rental Income']   = result['money_in']
+    result['pl_items']['Management Fees'] = result['money_out']
     return result
 
 
