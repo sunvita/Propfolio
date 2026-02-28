@@ -682,7 +682,7 @@ if st.session_state.step == 0:
         '</svg>'
         '<p style="margin:10px 0 0;font-size:17px;color:#FFFFFF;">Negatively or positively geared — and by how much?</p>'
         '<p style="margin:6px 0 0;font-size:17px;color:#FFFFFF;">'
-        'Drop your files. Propfolio knows exactly!</p>'
+        'Drop your files. Prop<span style="color:#FFA726;">folio</span> knows exactly!</p>'
         '</div>',
         unsafe_allow_html=True
     )
