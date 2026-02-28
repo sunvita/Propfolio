@@ -13,9 +13,10 @@ from openpyxl.styles.differential import DifferentialStyle
 # ── Universal constants (not theme-dependent) ──────────────────────────────────
 INPUT_BLUE = "FF0070C0"
 GREEN_LINK = "FF00B050"
-FY_YELLOW  = "FFFFC000"   # period marker – FY total column header
-CY_YELLOW  = "FFFFE699"   # period marker – CY total column header
-TMPL_GREY  = "FFF2F2F2"   # no-data template cell
+FY_YELLOW  = "FFFFC000"   # period marker – active FY total column header
+CY_YELLOW  = "FFFFE699"   # period marker – active CY total column header
+TMPL_GREY  = "FFF2F2F2"   # monthly cell – active FY, no data for that month
+MED_GREY   = "FFD0D0D0"   # inactive FY/CY column – entire column
 WHITE      = "FFFFFFFF"
 BLACK      = "FF000000"
 
@@ -214,7 +215,7 @@ def _fy_months(fy_start_month: int) -> list[int]:
 
 def _month_label(month: int, fy_label: str, fy_start: int) -> str:
     base_year = int(fy_label.split('-')[0])
-    end_year  = int(fy_label.split('-')[1]) if len(fy_label) == 7 else base_year + 1
+    end_year  = base_year + 1   # always 4-digit; avoids int('30')=30 → str[2:]='' bug
     mo_abbr   = calendar.month_abbr[month]
     year      = base_year if month >= fy_start else end_year
     return f'{mo_abbr}-{str(year)[2:]}'
@@ -333,7 +334,7 @@ def build_workbook(
         # ── Row 2: Legend ──────────────────────────────────────────────────
         ws.row_dimensions[2].height = 14
         legend = ('🟢 Income  🔴 Expenses  🔵 Net/Profit  🟣 Cash Flow  '
-                  '│  Yellow = FY Total  │  Lt.Yellow = CY Total  │  Grey = Template')
+                  '│  Yellow = Active FY  │  Lt.Yellow = Active CY  │  ▪ Med.Grey = Inactive column  │  Lt.Grey = No data')
         mcell(ws, 2, 1, min(last_col, 20), legend,
               F(size=8, italic=True, color='FF595959'), Fill('FFF8F8F8'), Aln('center'))
 
@@ -346,27 +347,46 @@ def build_workbook(
               F(bold=True, color=th['header_text'], size=9),
               Fill(th['header']), Aln('center', wrap=True))
 
+        # ── Pre-compute active/inactive maps (used in headers AND data rows) ──
+        fy_has_data_map = {
+            fy: any(
+                (int(fy.split('-')[0]) if mo >= fy_start_month
+                 else int(fy.split('-')[0]) + 1, mo) in prop_data
+                for mo in month_seq
+            )
+            for fy in fy_labels
+        }
+        cy_has_data_map = {
+            cy: any((cy, mo) in prop_data for mo in range(1, 13))
+            for cy in cy_labels
+        }
+
         for fy in fy_labels:
-            is_tmpl = not any((y, m) in prop_data for m in range(1, 13)
-                              for y in range(2020, 2040)
-                              if f'{y}-{str(y+1)[2:]}' == fy or
-                              f'{y-1}-{str(y)[2:]}' == fy)
-            fy_hdr_bg = TMPL_GREY if is_tmpl else FY_YELLOW
+            fy_active  = fy_has_data_map[fy]
+            fy_hdr_bg  = FY_YELLOW if fy_active else MED_GREY
 
             wcell(ws, 4, fy_total_col[fy], f'FY {fy}\nTotal',
                   F(bold=True, size=8), Fill(fy_hdr_bg), Aln('center', wrap=True))
 
             for mo in month_seq:
-                lbl = _month_label(mo, fy, fy_start_month)
-                base_yr  = int(fy.split('-')[0])
-                yr       = base_yr if mo >= fy_start_month else base_yr + 1
-                mo_bg    = TMPL_GREY if (yr, mo) not in prop_data else WHITE
+                lbl     = _month_label(mo, fy, fy_start_month)
+                base_yr = int(fy.split('-')[0])
+                yr      = base_yr if mo >= fy_start_month else base_yr + 1
+                has_mo  = (yr, mo) in prop_data
+                # Inactive FY → entire column medium grey
+                # Active FY   → white if month has data, light grey if no data yet
+                if not fy_active:
+                    mo_bg = MED_GREY
+                else:
+                    mo_bg = WHITE if has_mo else TMPL_GREY
                 wcell(ws, 4, fy_month_cols[fy][mo], lbl,
                       F(bold=True, size=8), Fill(mo_bg), Aln('center', wrap=True))
 
         for cy in cy_labels:
+            cy_active = cy_has_data_map[cy]
+            cy_hdr_bg = CY_YELLOW if cy_active else MED_GREY
             wcell(ws, 4, cy_col[cy], f'CY {cy}',
-                  F(bold=True, size=8), Fill(CY_YELLOW), Aln('center', wrap=True))
+                  F(bold=True, size=8), Fill(cy_hdr_bg), Aln('center', wrap=True))
 
         # ── Column outline grouping (monthly cols collapse per FY) ─────────
         for fy in fy_labels:
@@ -417,17 +437,9 @@ def build_workbook(
             wcell(ws, excel_row, 1, label,
                   font=lbl_font, fill=sem_fill, aln=Aln('left'))
 
-            # Check which FYs have any data (for FY total coloring)
-            fy_has_data_map = {}
+            # ── Monthly cells ──────────────────────────────────────────────
             for fy in fy_labels:
-                base_yr = int(fy.split('-')[0])
-                fy_has_data_map[fy] = any(
-                    (base_yr if mo >= fy_start_month else base_yr + 1, mo) in prop_data
-                    for mo in month_seq
-                )
-
-            # ── Monthly cells (white/grey – no semantic noise) ─────────────
-            for fy in fy_labels:
+                fy_active = fy_has_data_map[fy]
                 for mo in month_seq:
                     mc_idx  = fy_month_cols[fy][mo]
                     base_yr = int(fy.split('-')[0])
@@ -474,20 +486,23 @@ def build_workbook(
                     else:
                         val, fc = None, F(size=9)
 
-                    # Monthly cells: white if data, grey if template
-                    mo_bg = Fill(TMPL_GREY) if not has_data else Fill(WHITE)
+                    # Inactive FY → medium grey; active FY → white (data) / light grey (no data)
+                    if not fy_active:
+                        mo_bg = Fill(MED_GREY)
+                    else:
+                        mo_bg = Fill(WHITE) if has_data else Fill(TMPL_GREY)
                     nm = (NUM_PERCENT if label == 'NOI Margin %' else
                           NUM_INT    if rtype in ('item', 'total', 'kpi') else None)
                     wcell(ws, excel_row, mc_idx, val, font=fc, fill=mo_bg,
                           aln=Aln('right'), num_fmt=nm)
 
-                # ── FY Total column – semantic if data, FY_YELLOW if template ─
-                ft_col   = fy_total_col[fy]
+                # ── FY Total column – semantic if active, medium grey if inactive ─
+                ft_col       = fy_total_col[fy]
                 s_col, e_col = fy_month_range[fy]
-                cr       = col(ft_col)
-                has_fy   = fy_has_data_map[fy]
-                ft_bg    = sem_fill if (has_fy and sem_fill) else Fill(FY_YELLOW)
-                ft_fg    = sem_fg if (has_fy and sem_fg) else BLACK
+                cr           = col(ft_col)
+                has_fy       = fy_active   # already computed above
+                ft_bg        = sem_fill if (has_fy and sem_fill) else Fill(MED_GREY)
+                ft_fg        = sem_fg   if (has_fy and sem_fg)   else BLACK
 
                 if rtype == 'item':
                     ft_val = f'=SUM({col(s_col)}{excel_row}:{col(e_col)}{excel_row})'
@@ -572,8 +587,13 @@ def build_workbook(
                 else:
                     cy_val = None
 
-                cy_bg = sem_fill if sem_fill else Fill(CY_YELLOW)
-                cy_fg = sem_fg if sem_fg else BLACK
+                cy_active = cy_has_data_map[cy]
+                if cy_active and sem_fill:
+                    cy_bg = sem_fill
+                    cy_fg = sem_fg or BLACK
+                else:
+                    cy_bg = Fill(MED_GREY)
+                    cy_fg = BLACK
                 nm = NUM_PERCENT if label == 'NOI Margin %' else NUM_INT
                 wcell(ws, excel_row, cy_col[cy], cy_val,
                       font=F(size=9, bold=(rtype in ('total', 'kpi')), color=cy_fg),
@@ -608,9 +628,14 @@ def build_workbook(
               F(bold=True, color=th['header_text'], size=9),
               Fill(th['section']), Aln('center', wrap=True))
         for pk in kpi_periods:
-            actual_c = period_to_col_map[pk]
-            is_cy    = pk.startswith('CY')
-            bg       = CY_YELLOW if is_cy else FY_YELLOW
+            actual_c  = period_to_col_map[pk]
+            is_cy     = pk.startswith('CY')
+            if is_cy:
+                cy_key = int(pk.split()[1])
+                bg = CY_YELLOW if cy_has_data_map.get(cy_key) else MED_GREY
+            else:
+                fy_key = pk[3:]   # strip 'FY '
+                bg = FY_YELLOW if fy_has_data_map.get(fy_key) else MED_GREY
             wcell(ws, r, actual_c, pk, F(bold=True, size=9), Fill(bg),
                   Aln('center', wrap=True))
         r += 1
@@ -626,7 +651,7 @@ def build_workbook(
 
         for kpi_disp, pl_label, nm in kpi_items:
             ws.row_dimensions[r].height = 15
-            pl_row   = LABEL_ROW.get(pl_label)
+            pl_row           = LABEL_ROW.get(pl_label)
             row_sem_fill, row_sem_fg = _sem(pl_label, th)
             wcell(ws, r, 1, kpi_disp,
                   F(bold=True, size=9, color=row_sem_fg or BLACK),
@@ -635,9 +660,14 @@ def build_workbook(
             for pk in kpi_periods:
                 actual_c = period_to_col_map[pk]
                 is_cy    = pk.startswith('CY')
-                bg       = CY_YELLOW if is_cy else FY_YELLOW
+                if is_cy:
+                    cy_key   = int(pk.split()[1])
+                    kpi_bg   = CY_YELLOW if cy_has_data_map.get(cy_key) else MED_GREY
+                else:
+                    fy_key   = pk[3:]
+                    kpi_bg   = FY_YELLOW if fy_has_data_map.get(fy_key) else MED_GREY
                 formula  = f'={col(actual_c)}{pl_row}' if pl_row else None
-                wcell(ws, r, actual_c, formula, F(size=9), Fill(bg),
+                wcell(ws, r, actual_c, formula, F(size=9), Fill(kpi_bg),
                       Aln('right'), nm)
             r += 1
 
@@ -651,15 +681,20 @@ def build_workbook(
         for pk in kpi_periods:
             actual_c = period_to_col_map[pk]
             is_cy    = pk.startswith('CY')
-            bg       = CY_YELLOW if is_cy else FY_YELLOW
-            cr       = col(actual_c)
+            if is_cy:
+                cy_key  = int(pk.split()[1])
+                kpi_bg  = CY_YELLOW if cy_has_data_map.get(cy_key) else MED_GREY
+            else:
+                fy_key  = pk[3:]
+                kpi_bg  = FY_YELLOW if fy_has_data_map.get(fy_key) else MED_GREY
+            cr = col(actual_c)
             if noi_r and fin_r:
                 formula = (f'=IFERROR({cr}{noi_r}/({cr}{fin_r}+{cr}{prin_r}),"-")'
                            if prin_r else
                            f'=IFERROR({cr}{noi_r}/{cr}{fin_r},"-")')
             else:
                 formula = None
-            wcell(ws, r, actual_c, formula, F(size=9), Fill(bg),
+            wcell(ws, r, actual_c, formula, F(size=9), Fill(kpi_bg),
                   Aln('right'), NUM_DSCR)
         r += 1
 
