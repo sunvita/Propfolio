@@ -838,13 +838,18 @@ elif st.session_state.step == 1:
 
     col1, col2 = st.columns(2)
     with col1:
-        n_props = st.selectbox("Number of properties", list(range(1, 11)), index=0,
+        n_props = st.selectbox("Number of properties", list(range(1, 11)),
+                               index=list(range(1, 11)).index(
+                                   st.session_state.get('setup_n_props', 1)),
+                               key='setup_n_props',
                                help="Up to 10 properties. Each gets its own tab.")
         fy_start = st.selectbox(
             "Financial Year start month",
             list(MONTH_NAMES.keys()),
             format_func=lambda x: MONTH_NAMES[x],
-            index=6,   # July
+            index=list(MONTH_NAMES.keys()).index(
+                st.session_state.get('setup_fy_start', list(MONTH_NAMES.keys())[6])),
+            key='setup_fy_start',
             help="Australian FY = July. Change if your FY starts in a different month."
         )
 
@@ -855,13 +860,17 @@ elif st.session_state.step == 1:
         with fy_c1:
             fy_first = st.number_input(
                 "Oldest FY start year",
-                min_value=2010, max_value=2040, value=2024, step=1,
+                min_value=2010, max_value=2040,
+                value=int(st.session_state.get('setup_fy_first', 2024)), step=1,
+                key='setup_fy_first',
                 help="Oldest year with actual data. e.g. 2024 → FY 2024-25"
             )
         with fy_c2:
             fy_last = st.number_input(
                 "Template extends to FY",
-                min_value=2010, max_value=2050, value=2029, step=1,
+                min_value=2010, max_value=2050,
+                value=int(st.session_state.get('setup_fy_last', 2029)), step=1,
+                key='setup_fy_last',
                 help="Last template year. e.g. 2029 → FY 2029-30"
             )
 
