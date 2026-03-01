@@ -1134,6 +1134,14 @@ def _ailo_bills_from_columns(text: str) -> tuple:
         if _amt <= 0 or _BILL_SKIP.match(_cat_text):
             continue
 
+        # Rule 1b: skip GST disclosure sub-lines (wrapped continuation of prior expense).
+        # In Ailo PDFs the GST amount is rendered on a sub-line whose description
+        # ends with the word "GST" (e.g. "Services · Due on 1 Feb 2026 GST  $7.27").
+        # These are NOT separate expenses — they are the tax component already embedded
+        # in the parent bill line and must not be double-counted.
+        if re.search(r'\bGST\s*$', _desc_text, re.IGNORECASE):
+            continue
+
         # Rule 2: skip if category or description identifies this as income
         if _AILO_INCOME.search(f'{_cat_text} {_desc_text}'):
             continue

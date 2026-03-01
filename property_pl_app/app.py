@@ -8,10 +8,12 @@ import pandas as pd
 from io import BytesIO
 import json
 import re
+import os
 import datetime
 import calendar
 from difflib import SequenceMatcher
 from openpyxl import load_workbook
+import streamlit.components.v1 as _stc
 
 from parsers.pdf_parser import parse_pdf, parse_document, cross_check_bank
 import parsers.pdf_parser as _pdf_parser_module
@@ -554,6 +556,7 @@ st.markdown("""
 
 # ── Session state init ──────────────────────────────────────────────────────────
 for key, default in {
+    'show_landing':         True,   # True = show marketing landing page
     'step':                 0,      # 0 = guide page (landing)
     'properties':           [],
     'parsed_results':       [],
@@ -629,42 +632,100 @@ with st.sidebar:
 """, unsafe_allow_html=True)
     st.markdown("---")
 
-    # ⓪ Getting Started (guide page) — always clickable except when already there
-    if st.session_state.step == 0:
-        st.markdown("**▶ ⓪ Getting Started**")
+    if st.session_state.get('show_landing', True):
+        # On landing page — show a single prompt to enter the app
+        st.markdown(
+            '<div style="color:#9E9E9E;font-size:13px;text-align:center;padding:8px 0;">'
+            'Free to try · No sign-up required</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("🚀 Try Free", use_container_width=True, type="primary",
+                     key="sidebar_try_free"):
+            st.session_state['show_landing'] = False
+            st.rerun()
     else:
-        if st.button("⓪ Getting Started", use_container_width=True,
-                     key="sidebar_guide"):
-            st.session_state.step = 0
+        # ← Back to Home
+        if st.button("← Home", use_container_width=True, key="sidebar_home"):
+            st.session_state['show_landing'] = True
             st.rerun()
 
-    # Steps 1–4
-    steps = ["① Setup", "② Upload PDFs", "③ Review & Edit", "④ Generate Excel"]
-    for i, s in enumerate(steps, 1):
-        if st.session_state.step == i:
-            st.markdown(f"**▶ {s}**")
-        elif i == 1 and st.session_state.step != 1:
-            # ① Setup is always navigable (forward from guide, back from later steps)
-            saved = st.session_state.get('prop_configs')
-            icon  = '✅' if st.session_state.step > 1 else '○'
-            label = f"{icon} {s}" + (' 💾' if saved else '')
-            if st.button(label, use_container_width=True, key="sidebar_setup"):
-                st.session_state.step = 1
-                st.rerun()
-        elif st.session_state.step > i:
-            st.markdown(f"✅ {s}")
-        else:
-            st.markdown(f"○ {s}")
+        st.markdown("---")
 
-    st.markdown("---")
-    st.caption(f"Parser v{_PARSER_VERSION}")
-    if st.button("🔄 Start Over", use_container_width=True):
-        for k in ['step', 'properties', 'parsed_results',
-                  'session_loaded', 'merge_change_log',
-                  'parse_done', 'uploaded_files_meta', '_setup_cfg']:
-            if k in st.session_state:
-                del st.session_state[k]
+        # ⓪ Getting Started (guide page) — always clickable except when already there
+        if st.session_state.step == 0:
+            st.markdown("**▶ ⓪ Getting Started**")
+        else:
+            if st.button("⓪ Getting Started", use_container_width=True,
+                         key="sidebar_guide"):
+                st.session_state.step = 0
+                st.rerun()
+
+        # Steps 1–4
+        steps = ["① Setup", "② Upload PDFs", "③ Review & Edit", "④ Generate Excel"]
+        for i, s in enumerate(steps, 1):
+            if st.session_state.step == i:
+                st.markdown(f"**▶ {s}**")
+            elif i == 1 and st.session_state.step != 1:
+                saved = st.session_state.get('prop_configs')
+                icon  = '✅' if st.session_state.step > 1 else '○'
+                label = f"{icon} {s}" + (' 💾' if saved else '')
+                if st.button(label, use_container_width=True, key="sidebar_setup"):
+                    st.session_state.step = 1
+                    st.rerun()
+            elif st.session_state.step > i:
+                st.markdown(f"✅ {s}")
+            else:
+                st.markdown(f"○ {s}")
+
+        st.markdown("---")
+        st.caption(f"Parser v{_PARSER_VERSION}")
+        if st.button("🔄 Start Over", use_container_width=True):
+            for k in ['step', 'properties', 'parsed_results',
+                      'session_loaded', 'merge_change_log',
+                      'parse_done', 'uploaded_files_meta', '_setup_cfg']:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LANDING PAGE (pre-app marketing view)
+# ─────────────────────────────────────────────────────────────────────────────
+if st.session_state.get('show_landing', True):
+    _landing_path = os.path.join(os.path.dirname(__file__), 'landing.html')
+    if os.path.exists(_landing_path):
+        with open(_landing_path, 'r', encoding='utf-8') as _f:
+            _landing_html = _f.read()
+        # Inject CTA override: clicking any .cta-btn inside the iframe would
+        # navigate the iframe, so we replace the CTA hrefs with a postMessage
+        # and catch it in the parent to trigger st.rerun via a hidden button.
+        _landing_html = _landing_html.replace(
+            'href="#signup"',
+            'href="javascript:void(0)" onclick="window.parent.postMessage(\'propfolio_try_free\',\'*\')"'
+        )
+        _stc.html(_landing_html, height=5200, scrolling=True)
+    else:
+        # Fallback if landing.html is missing
+        st.markdown(
+            '<div style="text-align:center;padding:80px 20px;">'
+            '<h1 style="font-size:2.5rem;font-weight:800;color:#1a1a2e;">Prop<span style="color:#FFA726;">folio</span></h1>'
+            '<p style="font-size:1.2rem;color:#6b6b80;margin-top:16px;">'
+            'Negatively or positively geared — and by how much?<br>'
+            'Drop your files. Prop<span style="color:#FFA726;">folio</span> knows exactly!</p>'
+            '</div>', unsafe_allow_html=True
+        )
+
+    # CTA button in Streamlit (always visible below the iframe / fallback)
+    st.markdown('<div style="margin:0 auto;max-width:320px;">', unsafe_allow_html=True)
+    if st.button("🚀 Try Free — Get Started →", use_container_width=True,
+                 type="primary", key="landing_cta"):
+        st.session_state['show_landing'] = False
         st.rerun()
+    st.markdown(
+        '<p style="text-align:center;font-size:13px;color:#9E9E9E;margin-top:8px;">'
+        'No sign-up required &nbsp;·&nbsp; 1 property free</p>'
+        '</div>', unsafe_allow_html=True
+    )
+    st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 0: Getting Started — User Guide

@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Propfolio — Property Portfolio P&L Builder</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #1a1a2e;
+      background: #fff;
+      line-height: 1.6;
+    }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Tokens ───────────────────────────────────────────────── */
+    :root {
+      --amber:    #FFA726;
+      --amber-dk: #F57C00;
+      --navy:     #1a1a2e;
+      --navy-md:  #2c2c4a;
+      --grey-lt:  #f7f7fb;
+      --grey-md:  #e8e8f0;
+      --grey-tx:  #6b6b80;
+      --radius:   12px;
+      --shadow:   0 4px 24px rgba(26,26,46,.08);
+    }
+
+    /* ── Layout ───────────────────────────────────────────────── */
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 32px; }
+    .section    { padding: 60px 0; }
+    .section-sm { padding: 40px 0; }
+
+    /* ── Buttons ──────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 13px 28px; border-radius: 8px;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+      border: none; transition: all .18s ease;
+    }
+    .btn-primary { background: var(--amber); color: #fff; }
+    .btn-primary:hover { background: var(--amber-dk); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(255,167,38,.35); }
+    .btn-outline { background: transparent; color: var(--navy); border: 2px solid var(--grey-md); }
+    .btn-outline:hover { border-color: var(--amber); color: var(--amber-dk); }
+    .btn-lg { padding: 16px 36px; font-size: 16px; border-radius: 10px; }
+
+    /* ── Nav ──────────────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,.93);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--grey-md);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo {
+      display: flex; align-items: center;
+      font-size: 22px; font-weight: 800; color: var(--navy);
+    }
+    .nav-logo .corner {
+      display: inline-block; width: 20px; height: 20px;
+      border-top: 3px solid var(--amber); border-left: 3px solid var(--amber);
+      border-radius: 3px 0 0 0; margin-right: 8px;
+    }
+    .nav-logo span { color: var(--amber); font-weight: 300; letter-spacing: 2px; }
+    .nav-links { display: flex; align-items: center; gap: 12px; }
+    .nav-link { font-size: 14px; color: var(--grey-tx); padding: 6px 12px; border-radius: 6px; transition: all .15s; }
+    .nav-link:hover { color: var(--navy); background: var(--grey-lt); }
+
+    /* ── Hero ─────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(160deg, #fff 0%, #fffbf2 55%, #fff4dc 100%);
+      padding: 96px 0 88px;
+      text-align: center;
+    }
+    .hero-eyebrow {
+      display: inline-block;
+      background: #fff3e0; color: var(--amber-dk);
+      font-size: 13px; font-weight: 600; letter-spacing: .4px;
+      padding: 5px 16px; border-radius: 20px; margin-bottom: 28px;
+    }
+    .hero h1 {
+      font-size: clamp(22px, 3vw, 32px);
+      font-weight: 800; line-height: 1.4;
+      color: #5a5a5a; margin-bottom: 0;
+    }
+    .hero-tagline {
+      font-size: clamp(28px, 3.8vw, 42px);
+      color: #2c2c4a; margin: 10px 0 40px;
+      font-weight: 800; line-height: 1.15;
+    }
+    .hero-tagline em { font-style: normal; color: var(--amber); }
+    .hero-cta { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+    .hero-trust {
+      margin-top: 20px; font-size: 13px; color: var(--grey-tx);
+      display: flex; justify-content: center; align-items: center; gap: 20px;
+    }
+    .hero-trust span::before { content: '·'; margin-right: 20px; }
+    .hero-trust span:first-child::before { display: none; }
+
+    /* ── Section titles ───────────────────────────────────────── */
+    .section-title {
+      text-align: center;
+      font-size: clamp(22px, 3vw, 34px);
+      font-weight: 800; color: var(--navy);
+    }
+    .section-sub {
+      text-align: center; color: var(--grey-tx);
+      font-size: 16px; margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto;
+    }
+
+    /* ── Pain ─────────────────────────────────────────────────── */
+    .pain { background: var(--grey-lt); }
+    .pain-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+      margin-top: 48px;
+    }
+    .pain-card {
+      background: #fff; border-radius: var(--radius);
+      padding: 30px 26px; box-shadow: var(--shadow);
+      border-top: 3px solid transparent;
+      transition: border-color .2s;
+    }
+    .pain-card:hover { border-top-color: var(--amber); }
+    .pain-icon { font-size: 30px; margin-bottom: 14px; }
+    .pain-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 10px; color: var(--navy); }
+    .pain-card p  { font-size: 14px; color: var(--grey-tx); line-height: 1.65; }
+
+    /* ── How it works ─────────────────────────────────────────── */
+    .steps {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 24px; margin-top: 56px; position: relative;
+    }
+    .steps::before {
+      content: '';
+      position: absolute; top: 27px; left: 12.5%; right: 12.5%; height: 2px;
+      background: linear-gradient(90deg, var(--amber), var(--amber-dk));
+      z-index: 0;
+    }
+    .step { text-align: center; position: relative; z-index: 1; }
+    .step-num {
+      width: 54px; height: 54px; border-radius: 50%;
+      background: var(--amber); color: #fff;
+      font-size: 18px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 18px; box-shadow: 0 4px 16px rgba(255,167,38,.3);
+    }
+    .step-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .8px;
+      text-transform: uppercase; color: var(--amber-dk);
+      margin-bottom: 6px;
+    }
+    .step h3 { font-size: 15px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+    .step p  { font-size: 13px; color: var(--grey-tx); line-height: 1.6; }
+
+    /* ── Persona ──────────────────────────────────────────────── */
+    .persona { background: var(--grey-lt); }
+    .persona-box {
+      background: #fff; border-radius: var(--radius);
+      padding: 40px 48px; max-width: 740px; margin: 48px auto 0;
+      box-shadow: var(--shadow); border-left: 4px solid var(--amber);
+    }
+    .persona-box blockquote {
+      font-size: 17px; line-height: 1.75; color: var(--navy-md);
+      font-style: italic;
+    }
+    .persona-box cite {
+      display: block; margin-top: 18px;
+      font-size: 13px; color: var(--grey-tx); font-style: normal;
+    }
+
+    /* ── Pricing ──────────────────────────────────────────────── */
+    .pricing-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 28px; max-width: 800px; margin: 56px auto 0;
+    }
+    .plan-card {
+      border-radius: var(--radius); padding: 36px 32px;
+      border: 2px solid var(--grey-md); background: #fff;
+    }
+    .plan-card.featured {
+      border-color: var(--amber);
+      box-shadow: 0 8px 32px rgba(255,167,38,.18);
+      position: relative;
+    }
+    .plan-badge {
+      position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+      background: var(--amber); color: #fff;
+      font-size: 12px; font-weight: 700; padding: 4px 18px; border-radius: 20px;
+      white-space: nowrap;
+    }
+    .plan-name {
+      font-size: 13px; font-weight: 700; color: var(--grey-tx);
+      letter-spacing: .6px; text-transform: uppercase;
+    }
+    .plan-price {
+      font-size: 44px; font-weight: 800; color: var(--navy);
+      margin: 8px 0 4px; line-height: 1;
+    }
+    .plan-price sup { font-size: 20px; vertical-align: super; }
+    .plan-price small { font-size: 15px; font-weight: 400; color: var(--grey-tx); }
+    .plan-desc { font-size: 13px; color: var(--grey-tx); margin-bottom: 24px; line-height: 1.5; }
+    .plan-features { list-style: none; }
+    .plan-features li {
+      font-size: 14px; padding: 9px 0;
+      border-bottom: 1px solid var(--grey-md);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .plan-features li:last-child { border-bottom: none; }
+    .ck { color: var(--amber); font-weight: 700; flex-shrink: 0; }
+    .no { color: #ccc; flex-shrink: 0; }
+    .plan-cta { margin-top: 28px; width: 100%; text-align: center; display: block; }
+
+    /* ── Preview mockup ──────────────────────────────────────── */
+    .preview-section {
+      background: linear-gradient(180deg, #fffbf2 0%, #f7f7fb 100%);
+      padding: 36px 0 48px;
+    }
+    .preview-label {
+      text-align: center; font-size: 12px; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase;
+      color: var(--amber-dk); margin-bottom: 20px;
+    }
+    .excel-frame {
+      max-width: 940px; margin: 0 auto;
+      border-radius: 10px; overflow: hidden;
+      box-shadow: 0 12px 48px rgba(26,26,46,.18);
+      border: 1px solid #d0d0d0;
+    }
+    .excel-titlebar {
+      background: #1f7145; padding: 8px 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .excel-titlebar span {
+      color: #fff; font-size: 12px; font-weight: 600;
+    }
+    .excel-titlebar .xl-logo {
+      background: #fff; color: #1f7145;
+      font-size: 11px; font-weight: 800;
+      padding: 1px 5px; border-radius: 3px;
+    }
+    .excel-ribbon {
+      background: #f3f3f3; border-bottom: 1px solid #d0d0d0;
+      padding: 4px 14px; font-size: 11px; color: #555;
+      display: flex; gap: 16px;
+    }
+    .excel-body { background: #fff; overflow-x: auto; }
+    .xl-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 11px; font-family: 'Segoe UI', Calibri, sans-serif;
+    }
+    .xl-table td, .xl-table th {
+      border: 1px solid #d0d0d0; padding: 4px 8px;
+      white-space: nowrap; text-align: right;
+    }
+    .xl-table td:first-child { text-align: left; min-width: 160px; font-weight: 500; }
+    /* Row type colours */
+    .row-header  { background: #1a1a2e; color: #fff; font-weight: 700; text-align: left !important; }
+    .row-income  { background: #e2efda; }
+    .row-expense { background: #fce4d6; }
+    .row-subtotal{ background: #deeaf1; font-weight: 700; }
+    .row-net     { background: #1a1a2e; color: #fff; font-weight: 700; }
+    .row-kpi     { background: #fff2cc; font-weight: 600; }
+    .row-label   { background: #f2f2f2; color: #555; font-size: 10px; }
+    /* Column header colours */
+    .col-fy-active { background: #ffc000; color: #000; font-weight: 700; }
+    .col-fy-total  { background: #bf8f00; color: #fff; font-weight: 700; }
+    .col-cy-active { background: #ffe699; color: #333; font-weight: 700; }
+    .col-cy-total  { background: #d4a800; color: #fff; font-weight: 700; }
+    .col-prop      { background: #2c2c4a; color: #fff; font-weight: 700; }
+    .col-grey      { background: #d0d0d0; color: #555; font-weight: 600; }
+    .num-pos { color: #375623; }
+    .num-neg { color: #c00000; }
+    /* Tab bar */
+    .excel-tabs {
+      background: #e0e0e0; padding: 0 10px;
+      display: flex; gap: 2px; align-items: flex-end;
+      border-top: 1px solid #bbb;
+    }
+    .xl-tab {
+      padding: 5px 14px; font-size: 11px; border-radius: 4px 4px 0 0;
+      border: 1px solid #bbb; border-bottom: none; cursor: pointer;
+      background: #d0d0d0; color: #555;
+    }
+    .xl-tab.active { background: #fff; color: #1a1a2e; font-weight: 600; border-bottom: 1px solid #fff; margin-bottom: -1px; }
+    .xl-tab.summary { background: #FFA726; color: #fff; font-weight: 600; }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    footer {
+      background: var(--navy); color: rgba(255,255,255,.55);
+      padding: 48px 0; text-align: center; font-size: 13px;
+    }
+    .foot-logo {
+      font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 8px;
+    }
+    .foot-logo span { color: var(--amber); font-weight: 300; letter-spacing: 2px; }
+    footer p { margin-top: 6px; }
+    footer a { color: rgba(255,255,255,.35); transition: color .15s; }
+    footer a:hover { color: var(--amber); }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ──────────────────────────────────────────────────────── -->
+<nav>
+  <div class="container">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <span class="corner"></span>Prop<span>folio</span>
+      </a>
+      <div class="nav-links">
+        <a href="#how" class="nav-link">How it works</a>
+        <a href="#pricing" class="nav-link">Pricing</a>
+        <a href="#signup" class="btn btn-outline" style="padding:8px 20px;font-size:14px;">Log in</a>
+        <a href="#signup" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Try free</a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-eyebrow">🇦🇺 Built for Australian property investors</div>
+    <h1>Negatively or positively geared —<br>and by how much?</h1>
+    <p class="hero-tagline">Drop your files, Prop<em>folio</em> knows exactly</p>
+    <div class="hero-cta">
+      <a href="#signup" class="btn btn-primary btn-lg">Start for free →</a>
+      <a href="#how" class="btn btn-outline btn-lg">See how it works</a>
+    </div>
+    <div class="hero-trust">
+      <span>1 property · 6 months free</span>
+      <span>No credit card needed</span>
+      <span>Pro unlocks everything · $49 once</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pain ─────────────────────────────────────────────────────── -->
+<section class="section pain">
+  <div class="container">
+    <h2 class="section-title">Sound familiar?</h2>
+    <p class="section-sub">Too many files, too much manual entry, and tax time always on its way.</p>
+    <div class="pain-grid">
+
+      <div class="pain-card">
+        <div class="pain-icon">📄</div>
+        <h3>Your spreadsheet doesn't fill itself</h3>
+        <p>Rental statements, bank exports, council rates, strata notices — open, find the number, paste. You built a great spreadsheet. Now you spend every month feeding it.</p>
+      </div>
+
+      <div class="pain-card">
+        <div class="pain-icon">🏠🏠</div>
+        <h3>How's your portfolio really doing? Hard to say.</h3>
+        <p>A second IP or a rooming house means more files to open, more numbers to enter manually, and no single view of how your portfolio is actually performing.</p>
+      </div>
+
+      <div class="pain-card">
+        <div class="pain-icon">📊</div>
+        <h3>Tax time — same scramble, every year</h3>
+        <p>Your accountant needs a clean P&L. Reconstructing a full financial year from scattered files and half-done spreadsheets is a headache you keep putting off.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── How it works ──────────────────────────────────────────────── -->
+<section class="section" id="how">
+  <div class="container">
+    <h2 class="section-title">Drop files &amp; Get P&L in minutes</h2>
+    <p class="section-sub">Your statements are transformed into a fully formatted Excel workbook — P&L per property and a portfolio summary — so you know exactly how every property is performing.</p>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num">①</div>
+        <div class="step-label">Step 1</div>
+        <h3>Setup</h3>
+        <p>Add your properties — address, purchase price, loan details, FY range. Two minutes once.</p>
+      </div>
+
+      <div class="step">
+        <div class="step-num">②</div>
+        <div class="step-label">Step 2</div>
+        <h3>Upload files</h3>
+        <p>Drop in rental statements, bank records (PDF, CSV, TSV), utility bills, and invoices. Auto-detected and parsed instantly.</p>
+      </div>
+
+      <div class="step">
+        <div class="step-num">③</div>
+        <div class="step-label">Step 3</div>
+        <h3>Review &amp; edit</h3>
+        <p>Check parsed figures in editable tables. Add fixed or recurring expenses — Internet, Insurance, Strata — with one click.</p>
+      </div>
+
+      <div class="step">
+        <div class="step-num">④</div>
+        <div class="step-label">Step 4</div>
+        <h3>Generate Excel</h3>
+        <p>Pick a colour theme. Download your fully formatted P&L workbook — one tab per property, plus a portfolio summary.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Preview mockup ───────────────────────────────────────────── -->
+<section class="preview-section">
+  <div class="container">
+    <p class="preview-label">✦ What your output looks like</p>
+    <div class="excel-frame">
+
+      <div class="excel-titlebar">
+        <span class="xl-logo">X</span>
+        <span>Property_PL_Portfolio.xlsx — Propfolio</span>
+      </div>
+
+      <div class="excel-ribbon">
+        <span>File</span><span>Home</span><span>Insert</span><span>View</span>
+        <span style="margin-left:auto;color:#1f7145;font-weight:600;">📥 Downloaded from Propfolio</span>
+      </div>
+
+      <div class="excel-body">
+        <table class="xl-table">
+          <thead>
+            <tr>
+              <th class="col-prop">12 Example St, Brisbane QLD</th>
+              <th class="col-fy-active">Jul 25</th>
+              <th class="col-fy-active">Aug 25</th>
+              <th class="col-fy-active">Sep 25</th>
+              <th class="col-fy-active">Oct 25</th>
+              <th class="col-fy-active">Nov 25</th>
+              <th class="col-fy-active">Dec 25</th>
+              <th class="col-fy-total">FY Total</th>
+              <th class="col-cy-active">CY 2025</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="row-label"><td colspan="9">─── INCOME ───────────────────────────────────</td></tr>
+            <tr class="row-income">
+              <td>Rental Income</td>
+              <td class="num-pos">2,600</td><td class="num-pos">2,600</td><td class="num-pos">2,600</td>
+              <td class="num-pos">2,730</td><td class="num-pos">2,730</td><td class="num-pos">2,730</td>
+              <td class="num-pos">15,990</td><td class="num-pos">10,790</td>
+            </tr>
+            <tr class="row-income">
+              <td>Cash Received (EFT)</td>
+              <td class="num-pos">2,418</td><td class="num-pos">2,418</td><td class="num-pos">2,418</td>
+              <td class="num-pos">2,539</td><td class="num-pos">2,539</td><td class="num-pos">2,539</td>
+              <td class="num-pos">14,871</td><td class="num-pos">10,033</td>
+            </tr>
+            <tr class="row-label"><td colspan="9">─── OPERATING EXPENSES ───────────────────────</td></tr>
+            <tr class="row-expense">
+              <td>Management Fees</td>
+              <td class="num-neg">182</td><td class="num-neg">182</td><td class="num-neg">182</td>
+              <td class="num-neg">191</td><td class="num-neg">191</td><td class="num-neg">191</td>
+              <td class="num-neg">1,119</td><td class="num-neg">757</td>
+            </tr>
+            <tr class="row-expense">
+              <td>Mortgage (Interest)</td>
+              <td class="num-neg">1,840</td><td class="num-neg">1,840</td><td class="num-neg">1,840</td>
+              <td class="num-neg">1,840</td><td class="num-neg">1,840</td><td class="num-neg">1,840</td>
+              <td class="num-neg">11,040</td><td class="num-neg">7,360</td>
+            </tr>
+            <tr class="row-expense">
+              <td>Council Rates</td>
+              <td class="num-neg">—</td><td class="num-neg">—</td><td class="num-neg">420</td>
+              <td class="num-neg">—</td><td class="num-neg">—</td><td class="num-neg">420</td>
+              <td class="num-neg">840</td><td class="num-neg">420</td>
+            </tr>
+            <tr class="row-expense">
+              <td>Strata Levy</td>
+              <td class="num-neg">—</td><td class="num-neg">—</td><td class="num-neg">1,250</td>
+              <td class="num-neg">—</td><td class="num-neg">—</td><td class="num-neg">1,250</td>
+              <td class="num-neg">2,500</td><td class="num-neg">1,250</td>
+            </tr>
+            <tr class="row-expense">
+              <td>Insurance</td>
+              <td class="num-neg">—</td><td class="num-neg">1,200</td><td class="num-neg">—</td>
+              <td class="num-neg">—</td><td class="num-neg">—</td><td class="num-neg">—</td>
+              <td class="num-neg">1,200</td><td class="num-neg">1,200</td>
+            </tr>
+            <tr class="row-expense">
+              <td>Internet</td>
+              <td class="num-neg">89</td><td class="num-neg">89</td><td class="num-neg">89</td>
+              <td class="num-neg">89</td><td class="num-neg">89</td><td class="num-neg">89</td>
+              <td class="num-neg">534</td><td class="num-neg">356</td>
+            </tr>
+            <tr class="row-subtotal">
+              <td>Total Operating Expenses</td>
+              <td class="num-neg">2,111</td><td class="num-neg">3,311</td><td class="num-neg">3,781</td>
+              <td class="num-neg">2,120</td><td class="num-neg">2,120</td><td class="num-neg">3,790</td>
+              <td class="num-neg">17,233</td><td class="num-neg">11,343</td>
+            </tr>
+            <tr class="row-net">
+              <td>NOI (Net Operating Income)</td>
+              <td class="num-pos">489</td><td class="num-neg">(711)</td><td class="num-neg">(1,181)</td>
+              <td class="num-pos">610</td><td class="num-pos">610</td><td class="num-neg">(1,060)</td>
+              <td class="num-neg">(1,243)</td><td class="num-neg">(553)</td>
+            </tr>
+            <tr class="row-label"><td colspan="9">─── KPI ──────────────────────────────────────</td></tr>
+            <tr class="row-kpi">
+              <td>Gross Yield</td>
+              <td colspan="6" style="text-align:center;">5.8%</td>
+              <td colspan="2" style="text-align:center;color:#375623;font-weight:700;">▲ Positively trending</td>
+            </tr>
+            <tr class="row-kpi">
+              <td>Net Cash Flow (after mortgage)</td>
+              <td class="num-neg">(1,351)</td><td class="num-neg">(2,551)</td><td class="num-neg">(3,021)</td>
+              <td class="num-neg">(1,230)</td><td class="num-neg">(1,230)</td><td class="num-neg">(2,900)</td>
+              <td class="num-neg">(12,283)</td><td class="num-neg">(7,913)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="excel-tabs">
+        <div class="xl-tab active">📋 12 Example St</div>
+        <div class="xl-tab">📋 45 Riverside Dr</div>
+        <div class="xl-tab">📋 7 Hill Rd (Rooming)</div>
+        <div class="xl-tab summary">📊 Portfolio Summary</div>
+      </div>
+
+    </div><!-- /excel-frame -->
+  </div>
+</section>
+
+<!-- ── Pricing ───────────────────────────────────────────────────── -->
+<section class="section" id="pricing">
+  <div class="container">
+    <h2 class="section-title">Pricing</h2>
+    <p class="section-sub">Try your first property free. $49 once, unlimited access forever.</p>
+    <div class="pricing-grid">
+
+      <!-- Free -->
+      <div class="plan-card">
+        <div class="plan-name">Free</div>
+        <div class="plan-price"><sup>$</sup>0</div>
+        <div class="plan-desc">1 property · 6 months of data.<br>No credit card. No time limit.</div>
+        <ul class="plan-features">
+          <li><span class="ck">✓</span> 1 property</li>
+          <li><span class="ck">✓</span> 6 months of data</li>
+          <li><span class="ck">✓</span> PDF &amp; CSV / TSV auto-parse</li>
+          <li><span class="ck">✓</span> Excel P&amp;L download</li>
+          <li><span class="no">—</span> Multiple properties</li>
+          <li><span class="no">—</span> Full FY history</li>
+          <li><span class="no">—</span> ⚡ Add Entry (fixed &amp; recurring)</li>
+          <li><span class="no">—</span> Session save &amp; restore</li>
+          <li><span class="no">—</span> Restore from Excel</li>
+          <li><span class="no">—</span> Portfolio Summary tab</li>
+        </ul>
+        <a href="#signup" class="btn btn-outline plan-cta btn-lg">Try free →</a>
+      </div>
+
+      <!-- Pro -->
+      <div class="plan-card featured">
+        <div class="plan-badge">Most efficient</div>
+        <div class="plan-name">Pro</div>
+        <div class="plan-price"><sup>$</sup>49 <small>one-off</small></div>
+        <div class="plan-desc">Pay once. Use forever.<br>All future updates included.</div>
+        <ul class="plan-features">
+          <li><span class="ck">✓</span> Unlimited properties</li>
+          <li><span class="ck">✓</span> Full FY history — unlimited</li>
+          <li><span class="ck">✓</span> PDF &amp; CSV / TSV auto-parse</li>
+          <li><span class="ck">✓</span> Excel P&amp;L download</li>
+          <li><span class="ck">✓</span> ⚡ Add Entry (fixed &amp; recurring)</li>
+          <li><span class="ck">✓</span> Session save &amp; restore</li>
+          <li><span class="ck">✓</span> Restore from Excel</li>
+          <li><span class="ck">✓</span> Monthly update workflow</li>
+          <li><span class="ck">✓</span> Portfolio Summary tab</li>
+        </ul>
+        <a href="#signup" class="btn btn-primary plan-cta btn-lg">Get Pro for $49 →</a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Persona ───────────────────────────────────────────────────── -->
+<section class="section-sm persona">
+  <div class="container">
+    <h2 class="section-title">Who it's for</h2>
+    <div class="persona-box">
+      <blockquote>
+        "I'm good at Excel — I built my own P&L spreadsheet and it does the job. But every month
+        it's the same grind: hunt down the PDFs, find the numbers, paste them in one by one.
+        Two IPs and two rooming houses later, that's a Sunday afternoon gone every single month.
+        I just need the grunt work done — and the results ready to go."
+      </blockquote>
+      <cite>— Australian property investor · 3 properties incl. 2 rooming houses</cite>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ────────────────────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <div class="foot-logo">Prop<span>folio</span></div>
+    <p>Property Portfolio P&L Builder · Built for Australian investors</p>
+    <p style="margin-top:20px;">
+      © 2026 Propfolio &nbsp;·&nbsp;
+      <a href="#">Privacy</a> &nbsp;·&nbsp;
+      <a href="#">Contact</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
