@@ -261,8 +261,22 @@ BANK_CATEGORIES = {
     'mortgage':             ('financing', 'Mortgage Interest'),
     'home loan':            ('financing', 'Mortgage Interest'),
     'loan interest':        ('financing', 'Mortgage Interest'),
+    'interest charged':     ('financing', 'Mortgage Interest'),   # CBA: "Interest charged"
     'loan repayment':       ('financing', 'Mortgage Repayment'),
     'principal':            ('financing', 'Mortgage Repayment'),
+    # CBA Home Loan — recurring financing costs → included in P&L
+    'package fee':          ('financing', 'Bank Package Fee'),     # CBA annual package fee
+
+    # CBA / loan acquisition costs → shown in transactions but NOT in P&L
+    # (Section 'acquisition' is excluded from P&L section totals)
+    'lmi':                  ('acquisition', 'LMI'),
+    'lenders mortgage':     ('acquisition', 'LMI'),
+    "lender's mortgage":    ('acquisition', 'LMI'),                # CBA: "Lender's Mortgage Insurance charge"
+    'mortgage insurance':   ('acquisition', 'LMI'),
+    'bank fee':             ('acquisition', 'Bank Charges'),
+    'guarantee fee':        ('acquisition', 'Bank Charges'),       # CBA loan guarantee fee
+    'settlement fee':       ('acquisition', 'Bank Charges'),       # Conveyancing/settlement fee
+    'establishment fee':    ('acquisition', 'Bank Charges'),       # Loan establishment fee
 }
 
 # ── Invoice type detection: keywords → P&L category ─────────────────────────
@@ -1498,6 +1512,156 @@ def parse_rental_statement(file_bytes: bytes, filename: str = '') -> dict:
     return result
 
 
+# ── 2a-helper. CBA HOME LOAN STATEMENT PARSER ────────────────────────────────
+# Detects CBA Fixed Rate / SVR Investment Home Loan PDFs and extracts
+# per-month transactions: Interest charged, Package Fee, Bank fees, LMI.
+# Repayment/Payment rows are intentionally SKIPPED — they are loan repayments
+# that offset interest debits, not rental income or expenses.
+
+_CBA_HL_MARKER = re.compile(
+    r'Investment Home Loan Transactions', re.IGNORECASE
+)
+
+# Rows to skip (informational / repayment credits / loan principal drawdowns)
+_CBA_SKIP_RE = re.compile(
+    r'^(Opening balance|Closing balance|Repayment/?Payment|Repayment$|'
+    r'Payment$|Interest rate as of|Your interest only|We confirm|'
+    r'Change in interest|We have processed|Your elected|'
+    r'Money we lent you|Loan drawdown|Drawdown)',   # loan principal - not an expense
+    re.IGNORECASE
+)
+
+_CBA_MON = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+}
+
+def _parse_cba_home_loan_transactions(text: str) -> list:
+    """
+    Extract expense transactions from a CBA Home Loan PDF statement.
+
+    Handles multi-month statements by inferring the year from the statement
+    period header (e.g. "Statement period 1 Jul 2025 – 7 Dec 2025").
+
+    Returns a list of transaction dicts (date, description, amount, type,
+    section, category) — same schema as the generic bank statement parser.
+    """
+    # ── 1. Extract statement period to infer transaction years ────────────────
+    p = re.search(
+        r'Statement\s+period\s+\d{1,2}\s+(\w+)\s+(\d{4})\s*[-\u2013\u2014]\s*'
+        r'\d{1,2}\s+(\w+)\s+(\d{4})',
+        text, re.IGNORECASE,
+    )
+    if p:
+        start_mon = _CBA_MON.get(p.group(1).lower()[:3], 1)
+        start_yr  = int(p.group(2))
+        end_mon   = _CBA_MON.get(p.group(3).lower()[:3], 12)
+        end_yr    = int(p.group(4))
+    else:
+        yr_m = re.search(r'\b(20\d{2})\b', text)
+        start_yr = end_yr = int(yr_m.group(1)) if yr_m else 2025
+        start_mon, end_mon = 1, 12
+
+    def _infer_year(mon: int) -> int:
+        if start_yr == end_yr:
+            return start_yr
+        # Months in the start-year range → start_yr; otherwise end_yr
+        return start_yr if mon >= start_mon else end_yr
+
+    # ── 2. Transaction line regex ─────────────────────────────────────────────
+    # Matches: "17 Jul   Interest charged   2,499.68   ..."
+    # The amount may be negative (CBA shows debits as negative in some exports)
+    TX_RE = re.compile(
+        r'^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+        r'\s+(.+?)\s+(-?[\d,]+\.\d{2})',
+        re.IGNORECASE,
+    )
+
+    transactions = []
+    for line in text.splitlines():
+        line = line.strip()
+        m = TX_RE.match(line)
+        if not m:
+            continue
+
+        day_s, mon_s, desc, amt_s = (
+            m.group(1), m.group(2), m.group(3).strip(), m.group(4)
+        )
+
+        # Skip non-expense rows
+        if _CBA_SKIP_RE.search(desc):
+            continue
+        if re.search(
+            r'(balance|interest rate as of|interest only period|'
+            r'direct debit repayment|loan contract|repayment arrangements)',
+            desc, re.IGNORECASE,
+        ):
+            continue
+
+        mon_num = _CBA_MON.get(mon_s.lower()[:3])
+        if not mon_num:
+            continue
+
+        year     = _infer_year(mon_num)
+        date_str = f'{int(day_s):02d}/{mon_num:02d}/{year}'
+        amount   = abs(_parse_amount(amt_s) or 0.0)
+        if amount == 0.0:
+            continue
+
+        section, category = _categorize_by_keywords(desc)
+
+        transactions.append({
+            'date':        date_str,
+            'description': desc,
+            'amount':      round(amount, 2),
+            'type':        'debit',   # all kept rows are expense debits
+            'section':     section,
+            'category':    category,
+        })
+
+    # ── 3. Also extract one-off fees from the Loan Snapshot summary ───────────
+    # "Bank fees  + $200.00" or "Bank fees  $200.00" in summary
+    # "LMI  + $7,463.00" etc. — only present in setup statements
+    snapshot_date = None
+    snap_m = re.search(
+        r'Opening balance\s+\d{1,2}\s+(\w+)\s+(\d{4})',
+        text, re.IGNORECASE,
+    )
+    if snap_m:
+        s_mon = _CBA_MON.get(snap_m.group(1).lower()[:3])
+        s_yr  = int(snap_m.group(2))
+        if s_mon:
+            snapshot_date = f'01/{s_mon:02d}/{s_yr}'
+
+    if snapshot_date:
+        for pat, desc_lbl, cat_key in [
+            (r'Bank fees\s+[+\-]?\s*\$?([\d,]+\.\d{2})', 'Bank fees', 'bank fee'),
+            (r'\bLMI\b[^$\d]*\$?([\d,]+\.\d{2})',         'LMI',       'lmi'),
+        ]:
+            fee_m = re.search(pat, text, re.IGNORECASE)
+            if fee_m:
+                fee_amt = abs(_parse_amount(fee_m.group(1)) or 0.0)
+                if fee_amt > 0:
+                    # Only add if this exact amount is not already captured from
+                    # the transaction table (e.g. Package Fee = Bank fees in summary)
+                    already = any(
+                        t['amount'] == round(fee_amt, 2) and t['type'] == 'debit'
+                        for t in transactions
+                    )
+                    if not already:
+                        sec, cat = _categorize_by_keywords(cat_key)
+                        transactions.append({
+                            'date':        snapshot_date,
+                            'description': desc_lbl,
+                            'amount':      round(fee_amt, 2),
+                            'type':        'debit',
+                            'section':     sec,
+                            'category':    cat,
+                        })
+
+    return transactions
+
+
 # ── 2. BANK TRANSACTION STATEMENT ────────────────────────────────────────────
 def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
     text = _extract_text(file_bytes)
@@ -1512,6 +1676,24 @@ def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
     ym = _detect_year_month(text)
     if ym:
         result['year'], result['month'] = ym
+
+    # ── CBA Home Loan statement: use dedicated parser ─────────────────────────
+    # Detects "Investment Home Loan Transactions" header and routes to the
+    # CBA-specific extractor which handles multi-month dates, skips
+    # Repayment/Payment rows, and captures Package Fee / Bank fees / LMI.
+    if _CBA_HL_MARKER.search(text):
+        transactions = _parse_cba_home_loan_transactions(text)
+        result['transactions'] = transactions
+        cat_totals: dict = {}
+        for tx in transactions:
+            sec, cat = tx['section'], tx['category']
+            amt = tx['amount'] if tx['type'] == 'credit' else -tx['amount']
+            cat_totals.setdefault(sec, {}).setdefault(cat, 0.0)
+            cat_totals[sec][cat] = round(cat_totals[sec][cat] + amt, 2)
+        result['categorized'] = cat_totals
+        result['llm_count']   = 0
+        return result
+    # ── End CBA Home Loan fast-path ───────────────────────────────────────────
 
     transactions = []
 
