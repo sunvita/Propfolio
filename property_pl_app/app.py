@@ -551,12 +551,56 @@ st.markdown("""
     [data-testid="stMainBlockContainer"] {
         padding-top: 4.3rem !important;
     }
+
+    /* ── Plan badges ─────────────────────────────────────────────── */
+    .plan-badge {
+        display: inline-block; padding: 2px 11px; border-radius: 20px;
+        font-size: 11px; font-weight: 700; letter-spacing: .4px;
+        vertical-align: middle; margin-left: 6px;
+    }
+    .plan-badge-free {
+        background: #FFF3E0; color: #E65100; border: 1.5px solid #FFA726;
+    }
+    .plan-badge-pro {
+        background: #1A237E; color: #FFA726; border: 1.5px solid #FFA726;
+    }
+
+    /* ── Upgrade banner ─────────────────────────────────────────── */
+    .upgrade-banner {
+        background: linear-gradient(90deg,#FFA726 0%,#FF8F00 100%);
+        color: #1a1a2e; padding: 10px 20px; border-radius: 7px;
+        margin-bottom: 14px; font-size: 14px; font-weight: 600;
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .upgrade-banner a {
+        display: inline-block; background: #1a1a2e; color: #FFA726 !important;
+        text-decoration: none; padding: 5px 16px; border-radius: 20px;
+        font-size: 12px; font-weight: 700; white-space: nowrap;
+    }
+
+    /* ── Lock card ──────────────────────────────────────────────── */
+    .lock-card {
+        background: #fafafa; border: 2px dashed #D0D0D0;
+        border-radius: 10px; padding: 24px 28px; text-align: center;
+        margin: 10px 0;
+    }
+    .lock-card .lock-ico  { font-size: 28px; margin-bottom: 6px; }
+    .lock-card .lock-title { font-size: 15px; font-weight: 700; color: #333; margin-bottom: 4px; }
+    .lock-card .lock-desc  { font-size: 13px; color: #777; margin-bottom: 14px; }
+    .lock-cta {
+        display: inline-block; background: #FFA726; color: #1a1a2e !important;
+        text-decoration: none; padding: 7px 22px; border-radius: 20px;
+        font-weight: 700; font-size: 13px;
+    }
+    .lock-cta:hover { background: #FF8F00; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state init ──────────────────────────────────────────────────────────
 for key, default in {
     'show_landing':         True,   # True = show marketing landing page
+    'user_email':           None,   # populated after Supabase auth
+    'user_plan':            'free', # 'free' | 'pro'
     'step':                 0,      # 0 = guide page (landing)
     'properties':           [],
     'parsed_results':       [],
@@ -604,6 +648,47 @@ def make_fy_labels(first_year: int, last_year: int) -> list[str]:
     """Generate FY label list newest→oldest. e.g. first=2024, last=2029 → ['2029-30',...,'2024-25']"""
     return [f'{y}-{str(y+1)[2:]}' for y in range(last_year, first_year - 1, -1)]
 
+# ── Plan / gating helpers ───────────────────────────────────────────────────────
+# Replace STRIPE_URL with your live Stripe Payment Link before launch.
+STRIPE_URL = "https://buy.stripe.com/PLACEHOLDER"
+FREE_PROP_LIMIT   = 1    # max properties on free plan
+FREE_MONTH_LIMIT  = 6    # max months of data on free plan
+
+def _is_pro() -> bool:
+    """True when the current session has a Pro licence."""
+    return st.session_state.get('user_plan', 'free') == 'pro'
+
+def _plan_badge_html(plan: str | None = None) -> str:
+    """Return an inline HTML badge chip for the given plan (or current session plan)."""
+    p = plan or st.session_state.get('user_plan', 'free')
+    if p == 'pro':
+        return '<span class="plan-badge plan-badge-pro">PRO</span>'
+    return '<span class="plan-badge plan-badge-free">FREE</span>'
+
+def _render_upgrade_banner() -> None:
+    """Amber upgrade strip shown at the top of every in-app page for Free users."""
+    if not _is_pro():
+        st.markdown(
+            f'<div class="upgrade-banner">'
+            f'⚡ Free plan — 1 property · 6 months data · limited features'
+            f'<a href="{STRIPE_URL}" target="_blank">Upgrade to Pro — $49 once →</a>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+def _render_lock_card(feature: str, desc: str = "") -> None:
+    """Render a dashed lock card with an upgrade CTA in place of a Pro feature."""
+    st.markdown(
+        f'<div class="lock-card">'
+        f'<div class="lock-ico">🔒</div>'
+        f'<div class="lock-title">{feature}</div>'
+        f'<div class="lock-desc">{desc}</div>'
+        f'<a href="{STRIPE_URL}" target="_blank" class="lock-cta">'
+        f'Upgrade to Pro — $49 once →</a>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
 # ── Sidebar: steps ─────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -630,6 +715,26 @@ with st.sidebar:
   </svg>
 </div>
 """, unsafe_allow_html=True)
+
+    # ── Plan badge ────────────────────────────────────────────────────────────
+    _sb_plan = st.session_state.get('user_plan', 'free')
+    _sb_email = st.session_state.get('user_email')
+    if _sb_email:
+        _badge_cls = 'plan-badge-pro' if _sb_plan == 'pro' else 'plan-badge-free'
+        st.markdown(
+            f'<div style="text-align:center;padding:4px 0 8px;">'
+            f'<span style="font-size:12px;color:#ccc;">{_sb_email}</span><br>'
+            f'<span class="plan-badge {_badge_cls}">{_sb_plan.upper()}</span></div>',
+            unsafe_allow_html=True
+        )
+    else:
+        _badge_cls = 'plan-badge-pro' if _sb_plan == 'pro' else 'plan-badge-free'
+        st.markdown(
+            f'<div style="text-align:center;padding:4px 0 8px;">'
+            f'<span class="plan-badge {_badge_cls}">{_sb_plan.upper()}</span></div>',
+            unsafe_allow_html=True
+        )
+
     st.markdown("---")
 
     if st.session_state.get('show_landing', True):
@@ -687,6 +792,17 @@ with st.sidebar:
                     del st.session_state[k]
             st.rerun()
 
+        # ── Dev: plan toggle (remove after Supabase auth is wired up) ─────────
+        with st.expander("🛠 Dev — Plan toggle", expanded=False):
+            _dev_plan = st.selectbox(
+                "Simulate plan", ['free', 'pro'],
+                index=0 if st.session_state.get('user_plan', 'free') == 'free' else 1,
+                key='_dev_plan_select',
+                label_visibility='collapsed',
+            )
+            if _dev_plan != st.session_state.get('user_plan', 'free'):
+                st.session_state['user_plan'] = _dev_plan
+                st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LANDING PAGE (pre-app marketing view)
@@ -727,6 +843,9 @@ if st.session_state.get('show_landing', True):
         '</div>', unsafe_allow_html=True
     )
     st.stop()
+
+# ── Upgrade banner — shown at top of every in-app page for Free users ─────────
+_render_upgrade_banner()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 0: Getting Started — User Guide
@@ -927,58 +1046,66 @@ elif st.session_state.step == 1:
                 st.error(f"Could not read JSON file: {e}")
 
     # ── Excel → Session restore (no JSON saved) ────────────────────────────────
+    # Gate 2: Pro feature
     with st.expander("📊 Restore from Excel (no JSON available)", expanded=False):
-        st.markdown(
+        if not _is_pro():
+            _render_lock_card(
+                "Restore from Excel",
+                "Re-import a Propfolio-generated workbook to pick up where you left off — Pro only."
+            )
+        else:
+          st.markdown(
             '<div class="info-box">💡 <b>No Session JSON?</b> If you have a Propfolio-generated '
             'Excel workbook but forgot to save the session JSON, upload the Excel here. '
             'The app will automatically restore all property data, FY settings, '
             'purchase information, and monthly P&L figures from the workbook.'
             '</div>', unsafe_allow_html=True
-        )
-        excel_file = st.file_uploader(
-            "Upload Propfolio Excel workbook", type=['xlsx'], key='excel_restore_uploader',
-            label_visibility='collapsed',
-        )
-        if excel_file:
-            with st.spinner("Reading Excel workbook…"):
-                ok, msg, parsed = _parse_excel_to_session(excel_file.read())
-            if ok:
-                st.success(f"✅ {msg}")
+          )
+        if _is_pro():
+            excel_file = st.file_uploader(
+                "Upload Propfolio Excel workbook", type=['xlsx'], key='excel_restore_uploader',
+                label_visibility='collapsed',
+            )
+            if excel_file:
+                with st.spinner("Reading Excel workbook…"):
+                    ok, msg, parsed = _parse_excel_to_session(excel_file.read())
+                if ok:
+                    st.success(f"✅ {msg}")
 
-                # Preview what was found
-                n_p = len(parsed.get('properties', []))
-                pinfo = parsed.get('purchase_info', {})
-                previews = []
-                for p in parsed.get('properties', []):
-                    tab   = p['tab']
-                    addr  = pinfo.get(tab, {}).get('address', '—')
-                    n_mo  = len(p['data'])
-                    previews.append(f"**{p['name']}** · {addr} · {n_mo} months")
-                if previews:
-                    st.markdown('\n\n'.join(previews))
+                    # Preview what was found
+                    n_p = len(parsed.get('properties', []))
+                    pinfo = parsed.get('purchase_info', {})
+                    previews = []
+                    for p in parsed.get('properties', []):
+                        tab   = p['tab']
+                        addr  = pinfo.get(tab, {}).get('address', '—')
+                        n_mo  = len(p['data'])
+                        previews.append(f"**{p['name']}** · {addr} · {n_mo} months")
+                    if previews:
+                        st.markdown('\n\n'.join(previews))
 
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    if st.button("✅ Restore & continue adding PDFs →",
-                                 type="primary", use_container_width=True,
-                                 key="excel_restore_confirm"):
-                        _session_from_excel(parsed)
-                        st.session_state.step = 2
-                        st.rerun()
-                with col_b:
-                    if st.button("👁 Restore & review data first →",
-                                 use_container_width=True,
-                                 key="excel_restore_review"):
-                        _session_from_excel(parsed)
-                        st.session_state.step = 3
-                        st.rerun()
-            else:
-                st.error(f"❌ {msg}")
-                st.markdown(
-                    '<div class="warn-box">⚠️ Make sure you\'re uploading a Propfolio-generated '
-                    'Excel file. Manually-created workbooks with different column structures '
-                    'may not parse correctly.</div>', unsafe_allow_html=True
-                )
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("✅ Restore & continue adding PDFs →",
+                                     type="primary", use_container_width=True,
+                                     key="excel_restore_confirm"):
+                            _session_from_excel(parsed)
+                            st.session_state.step = 2
+                            st.rerun()
+                    with col_b:
+                        if st.button("👁 Restore & review data first →",
+                                     use_container_width=True,
+                                     key="excel_restore_review"):
+                            _session_from_excel(parsed)
+                            st.session_state.step = 3
+                            st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+                    st.markdown(
+                        '<div class="warn-box">⚠️ Make sure you\'re uploading a Propfolio-generated '
+                        'Excel file. Manually-created workbooks with different column structures '
+                        'may not parse correctly.</div>', unsafe_allow_html=True
+                    )
 
     st.markdown('<div class="step-badge">STEP 1 of 4</div>', unsafe_allow_html=True)
     st.markdown("### Property Setup")
@@ -1020,11 +1147,25 @@ elif st.session_state.step == 1:
 
     col1, col2 = st.columns(2)
     with col1:
-        n_props = st.selectbox(
-            "Number of properties", list(range(1, 11)),
-            key='setup_n_props',
-            help="Up to 10 properties. Each gets its own tab."
+        # Gate 1: Free plan → 1 property max
+        _prop_options = list(range(1, 11)) if _is_pro() else [1]
+        _prop_help = (
+            "Up to 10 properties. Each gets its own tab."
+            if _is_pro() else
+            "Free plan: 1 property. Upgrade to Pro for unlimited properties."
         )
+        n_props = st.selectbox(
+            "Number of properties", _prop_options,
+            key='setup_n_props',
+            help=_prop_help
+        )
+        if not _is_pro():
+            st.markdown(
+                f'<div style="font-size:12px;color:#E65100;margin-top:-8px;margin-bottom:4px;">'
+                f'🔒 Multiple properties — <a href="{STRIPE_URL}" target="_blank" '
+                f'style="color:#E65100;font-weight:700;">Upgrade to Pro</a></div>',
+                unsafe_allow_html=True
+            )
         fy_start = st.selectbox(
             "Financial Year start month",
             list(MONTH_NAMES.keys()),
@@ -1206,6 +1347,16 @@ elif st.session_state.step == 1:
 elif st.session_state.step == 2:
     st.markdown('<div class="step-badge">STEP 2 of 4</div>', unsafe_allow_html=True)
     st.markdown("### Upload PDFs")
+
+    # Gate 6: 6-month data cap on Free plan
+    if not _is_pro():
+        st.markdown(
+            f'<div class="warn-box">🔒 <b>Free plan — 6 months data limit.</b> '
+            f'Only the 6 most recent months will be included in your Excel output. '
+            f'<a href="{STRIPE_URL}" target="_blank" style="color:#E65100;font-weight:700;">'
+            f'Upgrade to Pro ($49 once)</a> for full FY history.</div>',
+            unsafe_allow_html=True
+        )
 
     if st.session_state.get('session_loaded'):
         n_months = sum(len(p['data']) for p in st.session_state.properties)
@@ -1462,6 +1613,23 @@ elif st.session_state.step == 2:
                     txns = result.get('transactions', [])
                     _llm_cnt = result.get('llm_count', 0)
                     _src     = result.get('source', 'pdf').upper()
+
+                    # ── Duplicate statement detection (ANZ / CBA / NAB — same account+stmt#) ──
+                    _acct_no = result.get('account_number')
+                    _stmt_no = result.get('statement_number')
+                    if _acct_no and _stmt_no:
+                        _dup_key = (_acct_no, _stmt_no)
+                        _seen_stmts = st.session_state.setdefault('_seen_bank_stmts', {})
+                        if _dup_key in _seen_stmts:
+                            st.warning(
+                                f"⚠️ **Duplicate statement** — Account `{_acct_no}` "
+                                f"Statement #{_stmt_no} was already uploaded "
+                                f"(`{_seen_stmts[_dup_key]}`). "
+                                f"This file will overwrite it with identical data."
+                            )
+                        else:
+                            _seen_stmts[_dup_key] = f.name
+
                     if txns:
                         # ── Summary metrics ────────────────────────────────
                         _credits = [t for t in txns if t['type'] == 'credit']
@@ -1668,8 +1836,15 @@ elif st.session_state.step == 3:
         'Less: Mortgage Repayment', 'Principal Repaid',
     ]
 
-    # ── Global Add Entry panel ────────────────────────────────────────────────
+    # ── Global Add Entry panel — Gate 3: Pro only ─────────────────────────────
     with st.expander("⚡ Add Entry — Fixed, Recurring or Manual", expanded=False):
+        if not _is_pro():
+            _render_lock_card(
+                "Add Entry — Pro feature",
+                "Manually add internet, insurance, strata or any recurring/one-off expense "
+                "directly into any month — without uploading a PDF."
+            )
+            st.stop()
         _prop_names = [p['name'] for p in st.session_state.properties]
         _prop_tabs  = [p['tab']  for p in st.session_state.properties]
 
@@ -1991,33 +2166,55 @@ elif st.session_state.step == 4:
                 type="primary",
             )
         with save_col:
-            session_json = _session_to_json()
-            save_filename = (
-                f"property_pl_session_"
-                f"{datetime.datetime.now().strftime('%Y%m')}.json"
-            )
-            st.download_button(
-                label="💾 Save Session (for next month)",
-                data=session_json,
-                file_name=save_filename,
-                mime="application/json",
-                use_container_width=True,
-                help="Save all property configs + data as JSON. "
-                     "Load it next month to add new PDFs on top of existing data.",
-            )
+            # Gate 4: Save Session — Pro only
+            if _is_pro():
+                session_json = _session_to_json()
+                save_filename = (
+                    f"property_pl_session_"
+                    f"{datetime.datetime.now().strftime('%Y%m')}.json"
+                )
+                st.download_button(
+                    label="💾 Save Session (for next month)",
+                    data=session_json,
+                    file_name=save_filename,
+                    mime="application/json",
+                    use_container_width=True,
+                    help="Save all property configs + data as JSON. "
+                         "Load it next month to add new PDFs on top of existing data.",
+                )
+            else:
+                st.markdown(
+                    f'<div style="border:2px dashed #D0D0D0;border-radius:8px;padding:12px 14px;'
+                    f'text-align:center;background:#fafafa;">'
+                    f'🔒 <b style="color:#333;">Save Session</b><br>'
+                    f'<span style="font-size:12px;color:#777;">Keep your data for next month — Pro only</span><br>'
+                    f'<a href="{STRIPE_URL}" target="_blank" class="lock-cta" '
+                    f'style="margin-top:10px;display:inline-block;">Upgrade — $49 once →</a>'
+                    f'</div>', unsafe_allow_html=True
+                )
 
-        st.markdown(
-            '<div class="info-box">💡 <b>Next month workflow</b>: '
-            'Click "Save Session" → next month, go to Step 1 → "Load previous session" '
-            '→ upload only the new month\'s PDFs → the app handles add/update automatically.'
-            '</div>', unsafe_allow_html=True
-        )
+        if _is_pro():
+            st.markdown(
+                '<div class="info-box">💡 <b>Next month workflow</b>: '
+                'Click "Save Session" → next month, go to Step 1 → "Load previous session" '
+                '→ upload only the new month\'s PDFs → the app handles add/update automatically.'
+                '</div>', unsafe_allow_html=True
+            )
 
         st.markdown("---")
         st.markdown("#### What's in the Excel?")
         for prop in st.session_state.properties:
             st.markdown(f"- **{prop['tab']}**: {prop['name']} — P&L + KPI Table A")
-        st.markdown("- **Summary**: Table B (Asset Info & Yields) + Table A (Portfolio Aggregates)")
+        # Gate 5: Summary tab — Pro badge note
+        if _is_pro():
+            st.markdown("- **Summary**: Table B (Asset Info & Yields) + Table A (Portfolio Aggregates)")
+        else:
+            st.markdown(
+                f'- **Summary tab** — 🔒 <span style="color:#E65100;font-size:13px;">'
+                f'Pro only &nbsp;<a href="{STRIPE_URL}" target="_blank" '
+                f'style="color:#E65100;font-weight:700;font-size:12px;">Upgrade →</a></span>',
+                unsafe_allow_html=True
+            )
 
     col1, col2 = st.columns([1, 1])
     with col1:

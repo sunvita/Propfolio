@@ -264,8 +264,9 @@ BANK_CATEGORIES = {
     'interest charged':     ('financing', 'Mortgage Interest'),   # CBA: "Interest charged"
     'loan repayment':       ('financing', 'Mortgage Repayment'),
     'principal':            ('financing', 'Mortgage Repayment'),
-    # CBA Home Loan — recurring financing costs → included in P&L
+    # Home Loan — recurring financing costs → included in P&L
     'package fee':          ('financing', 'Bank Package Fee'),     # CBA annual package fee
+    'loan service fee':     ('financing', 'Bank Service Fee'),     # NAB monthly $8 service fee
 
     # CBA / loan acquisition costs → shown in transactions but NOT in P&L
     # (Section 'acquisition' is excluded from P&L section totals)
@@ -1662,6 +1663,389 @@ def _parse_cba_home_loan_transactions(text: str) -> list:
     return transactions
 
 
+# ── 2a-helper. NAB HOME LOAN STATEMENT PARSER ─────────────────────────────────
+# NAB Tailored Home Loan PDFs use a flowing-text format, not a proper table.
+# Structure: "DD Mon YYYY  [Parent description]" header line, followed by
+# continuation sub-lines "Interest Charged ........... AMOUNT" and
+# "Loan Service Fee ........... AMOUNT [Balance Dr]".
+# Loan Repayment credits and all informational rows are skipped.
+
+_NAB_HL_MARKER = re.compile(r'NAB Tailored Home Loan', re.IGNORECASE)
+
+_NAB_MON = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+}
+
+# Date-prefixed lines to skip (informational / repayment rows)
+_NAB_DATE_SKIP_RE = re.compile(
+    r'(Brought forward|Carried forward|Loan Repayment|Please Note|'
+    r'Debit Interest This Financial Year|It.s a condition|No offset)',
+    re.IGNORECASE,
+)
+
+# Amount after ≥5 dots: "Interest Charged ......... 1,420.11 [optional balance Dr]"
+_NAB_DOTAMT_RE = re.compile(r'\.{5,}\s*([\d,]+\.\d{2})')
+
+
+def _parse_nab_home_loan_transactions(text: str) -> list:
+    """
+    Extract expense and cash-flow transactions from a NAB Tailored Home Loan PDF.
+
+    NAB uses full dates "DD Mon YYYY" on each header line, so year inference
+    is not required.  Sub-items inherit the date from the preceding header line.
+
+    P&L / financing:
+      Interest Charged  → section 'financing', category 'Mortgage Interest'
+      Loan Service Fee  → section 'financing', category 'Bank Service Fee'
+
+    Cash flow (P&I loan):
+      Loan Repayment    → section 'cashflow', category 'Less: Mortgage Repayment'
+                          (full repayment amount, used in Net Cash Flow formula)
+      Principal Repaid  → section 'cashflow', category 'Principal Repaid'
+                          (= Repayment − Interest − Service Fee, informational)
+
+    Both cash-flow items are attributed to the same month as the interest charge
+    so they align correctly in the monthly P&L grid.
+
+    NAB Loan Repayment layout quirk:
+      The repayment spans two lines:
+        Line 1 (date-header): "7 Jul 2025 Loan Repayment Nomad Horizons"
+        Line 2 (continuation): "From A/C 29-927-2632....... 1,648.17 261,842.34 Dr"
+      Or on a continuation page without the date prefix:
+        Line 1: "Loan Repayment Nomad Horizons"
+        Line 2: "From A/C 29-927-2632....... 1,648.17 260,874.89 Dr"
+      We capture the amount from the dot-leader pattern on line 2.
+    """
+    # Regex to detect a date-prefixed line
+    DATE_RE = re.compile(
+        r'^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+        r'\s+(\d{4})\b',
+        re.IGNORECASE,
+    )
+
+    current_date: str | None = None
+    in_transactions = False
+    transactions = []
+
+    # Per-cycle state for computing principal
+    pending_interest: float           = 0.0
+    pending_service_fee: float        = 0.0
+    pending_interest_date: str | None = None
+
+    # Two-line repayment state
+    expecting_repayment_amount: bool  = False
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # Start parsing when we reach the Transaction Details section
+        if re.search(r'Transaction Details', line, re.IGNORECASE):
+            in_transactions = True
+            continue
+        if not in_transactions:
+            continue
+
+        # ── Date-prefixed lines ───────────────────────────────────────────────
+        dm = DATE_RE.match(line)
+        if dm:
+            day, mon_s, yr = dm.group(1), dm.group(2), dm.group(3)
+            mon_num = _NAB_MON.get(mon_s.lower()[:3])
+            if mon_num:
+                current_date = f'{int(day):02d}/{mon_num:02d}/{yr}'
+            # If the rest of the line describes a Loan Repayment, flag it —
+            # the actual dollar amount appears on the next continuation line.
+            rest_of_line = line[dm.end():].strip()
+            if re.match(r'Loan\s+Repayment', rest_of_line, re.IGNORECASE):
+                expecting_repayment_amount = True
+            continue
+
+        # ── Sub-item lines (no date prefix) ──────────────────────────────────
+        if current_date is None:
+            continue
+
+        # ── Repayment continuation line: amount follows dot-leaders ──────────
+        # Handles both "From A/C 29-927-2632............ 1,648.17 ..." and
+        # special cases like "083064Refer To Cust......... 1,648.17 ..."
+        if expecting_repayment_amount:
+            amt_m = _NAB_DOTAMT_RE.search(line)
+            if amt_m and pending_interest_date:
+                repayment = abs(_parse_amount(amt_m.group(1)) or 0.0)
+                if repayment > 0:
+                    # Full repayment = cash out of bank account (used in Net Cash Flow)
+                    transactions.append({
+                        'date':        pending_interest_date,
+                        'description': 'Loan Repayment',
+                        'amount':      round(repayment, 2),
+                        'type':        'debit',
+                        'section':     'cashflow',
+                        'category':    'Less: Mortgage Repayment',
+                    })
+                    # Principal = repayment minus interest only.
+                    # Service Fee is a separate bank charge, not part of the P&I repayment split.
+                    principal = round(repayment - pending_interest, 2)
+                    if principal > 0:
+                        transactions.append({
+                            'date':        pending_interest_date,
+                            'description': 'Principal Repaid',
+                            'amount':      principal,
+                            'type':        'credit',   # positive — informational capital return
+                            'section':     'cashflow',
+                            'category':    'Principal Repaid',
+                        })
+                    # Reset cycle state
+                    pending_interest           = 0.0
+                    pending_service_fee        = 0.0
+                    pending_interest_date      = None
+            expecting_repayment_amount = False
+            continue
+
+        # ── Standalone Loan Repayment header (no date prefix, page-break case) ─
+        if re.match(r'^Loan\s+Repayment', line, re.IGNORECASE):
+            expecting_repayment_amount = True
+            continue
+
+        # ── Match "Interest Charged .........dots......... AMOUNT" ─────────────
+        if re.match(r'^Interest\s+Charged', line, re.IGNORECASE):
+            amt_m = _NAB_DOTAMT_RE.search(line)
+            if amt_m:
+                amount = abs(_parse_amount(amt_m.group(1)) or 0.0)
+                if amount > 0:
+                    sec, cat = _categorize_by_keywords('interest charged')
+                    transactions.append({
+                        'date':        current_date,
+                        'description': 'Interest Charged',
+                        'amount':      round(amount, 2),
+                        'type':        'debit',
+                        'section':     sec,
+                        'category':    cat,
+                    })
+                    # Track for principal derivation
+                    pending_interest      = round(amount, 2)
+                    pending_interest_date = current_date
+
+        # ── Match "Loan Service Fee .........dots......... AMOUNT" ─────────────
+        elif re.match(r'^Loan\s+Service\s+Fee', line, re.IGNORECASE):
+            amt_m = _NAB_DOTAMT_RE.search(line)
+            if amt_m:
+                amount = abs(_parse_amount(amt_m.group(1)) or 0.0)
+                if amount > 0:
+                    sec, cat = _categorize_by_keywords('loan service fee')
+                    transactions.append({
+                        'date':        current_date,
+                        'description': 'Loan Service Fee',
+                        'amount':      round(amount, 2),
+                        'type':        'debit',
+                        'section':     sec,
+                        'category':    cat,
+                    })
+                    # Service Fee is a separate charge — not deducted from principal calculation
+
+    return transactions
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANZ HOME LOAN / RESIDENTIAL INVEST. LOAN
+# ─────────────────────────────────────────────────────────────────────────────
+_ANZ_HL_MARKER = re.compile(
+    r'ANZ\s+(?:HOME\s+LOAN|RESIDENTIAL\s+INVEST\.?\s*LOAN)\s+STATEMENT',
+    re.IGNORECASE,
+)
+_ANZ_MON = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+    'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+    'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+}
+
+# "DD MON DESCRIPTION debit_amount blank balance DR"
+_ANZ_DEBIT_RE = re.compile(
+    r'^(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+'
+    r'(.+?)\s+([\d,]+\.\d{2})\s+blank\s+[\d,]+\.\d{2}\s+DR$',
+    re.IGNORECASE,
+)
+# "DD MON DESCRIPTION blank credit_amount balance DR"
+_ANZ_CREDIT_RE = re.compile(
+    r'^(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+'
+    r'(.+?)\s+blank\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+DR$',
+    re.IGNORECASE,
+)
+# Fallback: "DD MON DESCRIPTION amount balance DR" (no 'blank' — pdfplumber
+# omits the empty-cell placeholder on the first row after a year-header row).
+# Description keyword is used to classify: LOAN PAYMENT → credit, INTEREST → debit.
+_ANZ_NOBLANK_RE = re.compile(
+    r'^(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+'
+    r'(.+?)\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+DR$',
+    re.IGNORECASE,
+)
+# Year-marker line produced by pdfplumber for the Year sub-header row
+_ANZ_YEAR_RE = re.compile(r'^(\d{4})\s+blank', re.IGNORECASE)
+
+
+def _parse_anz_home_loan_transactions(text: str) -> list:
+    """
+    Parse ANZ Home Loan and ANZ Residential Investment Loan statements.
+
+    Statement format (pdfplumber table → text):
+      Year header:    "YYYY blank [blank]"
+      Debit line:     "DD MON DESCRIPTION  debit_amt  blank  balance DR"
+      Credit line:    "DD MON DESCRIPTION  blank  credit_amt  balance DR"
+
+    Captures per calendar month:
+      INTEREST (debit)              → Mortgage Interest
+      INTEREST ADJUSTMENT (debit)   → added to Mortgage Interest
+      INTEREST ADJUSTMENT (credit)  → subtracted from Mortgage Interest
+      LOAN PAYMENT (credit)         → summed → Less: Mortgage Repayment
+
+    Skips:
+      INTEREST REDIRECTED FROM … – offset account paying interest (IO loan)
+      ANZ M-BANKING TRANSFER …   – manual offset transfer paying interest
+      LOAN DRAWDOWN / PROGRESSIVE DRAWDOWN – principal advances
+      BALANCE BROUGHT FORWARD, rate-change notices, closing transfers, etc.
+
+    Monthly aggregation:
+      All weekly / fortnightly / monthly payments are summed to a single
+      monthly total so the P&L grid shows one row per month.
+
+    Principal derived as: Repayment − Interest (per month).
+      If Repayment = 0 (Interest-Only period), Principal = 0.
+    """
+    current_year: int | None = None
+    in_transactions = False
+
+    # {(year, month): {'interest': float, 'repayment': float}}
+    monthly: dict = {}
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # Detect start of transaction table
+        if re.search(r'Transaction details', line, re.IGNORECASE):
+            in_transactions = True
+            continue
+        if not in_transactions:
+            continue
+
+        # Year-marker (e.g. "2024 blank blank")
+        ym = _ANZ_YEAR_RE.match(line)
+        if ym:
+            current_year = int(ym.group(1))
+            continue
+
+        if current_year is None:
+            continue
+
+        # ── Debit line (INTEREST, INTEREST ADJUSTMENT debit) ────────────────
+        dm = _ANZ_DEBIT_RE.match(line)
+        if dm:
+            mon_s = dm.group(2)
+            desc  = dm.group(3).strip().upper()
+            amt   = abs(_parse_amount(dm.group(4)) or 0.0)
+            mon_num = _ANZ_MON.get(mon_s.lower()[:3])
+            if not mon_num or amt == 0:
+                continue
+            key = (current_year, mon_num)
+            monthly.setdefault(key, {'interest': 0.0, 'repayment': 0.0})
+
+            # INTEREST or INTEREST ADJUSTMENT (debit) → financing expense
+            if desc.startswith('INTEREST') and not desc.startswith('INTEREST REDIRECTED'):
+                monthly[key]['interest'] = round(monthly[key]['interest'] + amt, 2)
+            # All other debits (LOAN DRAWDOWN, PROGRESSIVE DRAWDOWN, GOVT FEES, etc.) → skip
+            continue
+
+        # ── Credit line (LOAN PAYMENT, INTEREST ADJUSTMENT credit) ──────────
+        cm = _ANZ_CREDIT_RE.match(line)
+        if cm:
+            mon_s = cm.group(2)
+            desc  = cm.group(3).strip().upper()
+            amt   = abs(_parse_amount(cm.group(4)) or 0.0)
+            mon_num = _ANZ_MON.get(mon_s.lower()[:3])
+            if not mon_num or amt == 0:
+                continue
+            key = (current_year, mon_num)
+            monthly.setdefault(key, {'interest': 0.0, 'repayment': 0.0})
+
+            if desc.startswith('LOAN PAYMENT'):
+                # Sum all weekly/fortnightly/monthly payments into one monthly total
+                monthly[key]['repayment'] = round(monthly[key]['repayment'] + amt, 2)
+            elif desc.startswith('INTEREST ADJUSTMENT'):
+                # Credit adjustment offsets interest (e.g. backdated recalculation)
+                monthly[key]['interest'] = round(monthly[key]['interest'] - amt, 2)
+            # INTEREST REDIRECTED FROM … / ANZ M-BANKING / CUSTOMER FUNDS / etc. → skip
+            continue
+
+        # ── Fallback: no-blank format (pdfplumber drops empty cell on first ─────
+        # row after a year-marker).  "DD MON DESC amount balance DR".
+        # Use description to classify — only LOAN PAYMENT and INTEREST are needed.
+        nb = _ANZ_NOBLANK_RE.match(line)
+        if nb:
+            mon_s = nb.group(2)
+            desc  = nb.group(3).strip().upper()
+            amt   = abs(_parse_amount(nb.group(4)) or 0.0)
+            mon_num = _ANZ_MON.get(mon_s.lower()[:3])
+            if not mon_num or amt == 0:
+                continue
+            key = (current_year, mon_num)
+            monthly.setdefault(key, {'interest': 0.0, 'repayment': 0.0})
+
+            if desc.startswith('LOAN PAYMENT'):
+                monthly[key]['repayment'] = round(monthly[key]['repayment'] + amt, 2)
+            elif desc.startswith('INTEREST') and not desc.startswith('INTEREST REDIRECTED'):
+                monthly[key]['interest'] = round(monthly[key]['interest'] + amt, 2)
+            # BALANCE BROUGHT FORWARD, PROGRESSIVE DRAWDOWN, etc. → skip
+
+    # ── Build per-month transaction list ────────────────────────────────────
+    transactions = []
+    for (yr, mon), data in sorted(monthly.items()):
+        interest  = max(round(data['interest'], 2), 0.0)   # guard against tiny negatives
+        repayment = round(data['repayment'], 2)
+
+        # Skip months with no direct repayment — this covers:
+        #   • Pure IO periods (interest paid via offset account / INTEREST REDIRECTED)
+        #   • Partial boundary months where no LOAN PAYMENT was recorded
+        # If nothing was repaid from this loan account, there is nothing to record.
+        if repayment == 0:
+            continue
+
+        date_str = f'01/{mon:02d}/{yr}'   # representative date = 1st of month
+
+        if interest > 0:
+            transactions.append({
+                'date':        date_str,
+                'description': 'Interest',
+                'amount':      interest,
+                'type':        'debit',
+                'section':     'financing',
+                'category':    'Mortgage Interest',
+            })
+
+        transactions.append({
+            'date':        date_str,
+            'description': 'Loan Payment',
+            'amount':      repayment,
+            'type':        'debit',
+            'section':     'cashflow',
+            'category':    'Less: Mortgage Repayment',
+        })
+
+        # Principal = repayment − interest (0 when repayment barely covers interest)
+        principal = round(repayment - interest, 2)
+        if principal > 0:
+            transactions.append({
+                'date':        date_str,
+                'description': 'Principal Repaid',
+                'amount':      principal,
+                'type':        'credit',   # positive informational figure
+                'section':     'cashflow',
+                'category':    'Principal Repaid',
+            })
+
+    return transactions
+
+
 # ── 2. BANK TRANSACTION STATEMENT ────────────────────────────────────────────
 def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
     text = _extract_text(file_bytes)
@@ -1692,8 +2076,83 @@ def parse_bank_statement(file_bytes: bytes, filename: str = '') -> dict:
             cat_totals[sec][cat] = round(cat_totals[sec][cat] + amt, 2)
         result['categorized'] = cat_totals
         result['llm_count']   = 0
+        # Expose account number + statement number for duplicate detection
+        # CBA format: "Account number 885252562" or "Account: 885252562"
+        #             May include BSB prefix like "Account number 062-800 885252562"
+        # Statement number: CBA statements often use a date-range identifier only;
+        # fall back to statement period start date as a surrogate unique key.
+        _cba_acct_m = re.search(
+            r'Account\s*(?:number|no\.?)?\s*[:\s]\s*([\d][\d\s\-]{5,15}\d)',
+            text, re.IGNORECASE,
+        )
+        _cba_stmt_m = re.search(r'Statement\s+(?:number|no\.?)\s*[:\s]\s*(\S+)', text, re.IGNORECASE)
+        # Fallback: use statement period start "1 Jul 2025" as surrogate stmt id
+        if not _cba_stmt_m:
+            _cba_stmt_m = re.search(
+                r'Statement\s+period\s+(\d{1,2}\s+\w+\s+\d{4})', text, re.IGNORECASE
+            )
+        if _cba_acct_m:
+            # Strip internal spaces/dashes so account numbers are comparable
+            result['account_number'] = re.sub(r'[\s\-]+', '', _cba_acct_m.group(1)).strip()
+        if _cba_stmt_m:
+            result['statement_number'] = _cba_stmt_m.group(1).strip()
         return result
     # ── End CBA Home Loan fast-path ───────────────────────────────────────────
+
+    # ── NAB Home Loan statement: use dedicated text parser ────────────────────
+    # NAB Tailored Home Loan PDFs use flowing text (not a table).  Date headers
+    # appear as "DD Mon YYYY Description"; Interest Charged and Loan Service Fee
+    # are on continuation sub-lines with amounts after dot-leaders.
+    if _NAB_HL_MARKER.search(text):
+        transactions = _parse_nab_home_loan_transactions(text)
+        result['transactions'] = transactions
+        cat_totals_nab: dict = {}
+        for tx in transactions:
+            sec, cat = tx['section'], tx['category']
+            amt = tx['amount'] if tx['type'] == 'credit' else -tx['amount']
+            cat_totals_nab.setdefault(sec, {}).setdefault(cat, 0.0)
+            cat_totals_nab[sec][cat] = round(cat_totals_nab[sec][cat] + amt, 2)
+        result['categorized'] = cat_totals_nab
+        result['llm_count']   = 0
+        # Expose account number + statement number for duplicate detection
+        # NAB format: "Account number 29-919-5446"
+        #             "Statement number 3 National Australia Bank..."
+        _nab_acct_m = re.search(r'Account\s+number\s+([\d\-]+)', text, re.IGNORECASE)
+        _nab_stmt_m = re.search(r'Statement\s+number\s+(\d+)', text, re.IGNORECASE)
+        if _nab_acct_m:
+            result['account_number']   = _nab_acct_m.group(1).strip()
+        if _nab_stmt_m:
+            result['statement_number'] = _nab_stmt_m.group(1).strip()
+        return result
+    # ── End NAB Home Loan fast-path ───────────────────────────────────────────
+
+    # ── ANZ Home Loan / Residential Investment Loan ───────────────────────────
+    # Detects "ANZ HOME LOAN STATEMENT" or "ANZ RESIDENTIAL INVEST. LOAN STATEMENT".
+    # Transactions are table-extracted with 'blank' as empty-cell placeholder.
+    # Handles weekly / fortnightly / monthly payment schedules by aggregating
+    # all LOAN PAYMENT credits into a single monthly total per calendar month.
+    # INTEREST REDIRECTED FROM (IO offset loans) is captured as interest but
+    # not as repayment → principal = 0 for those months (Interest-Only).
+    if _ANZ_HL_MARKER.search(text):
+        transactions = _parse_anz_home_loan_transactions(text)
+        result['transactions'] = transactions
+        cat_totals_anz: dict = {}
+        for tx in transactions:
+            sec, cat = tx['section'], tx['category']
+            amt = tx['amount'] if tx['type'] == 'credit' else -tx['amount']
+            cat_totals_anz.setdefault(sec, {}).setdefault(cat, 0.0)
+            cat_totals_anz[sec][cat] = round(cat_totals_anz[sec][cat] + amt, 2)
+        result['categorized'] = cat_totals_anz
+        result['llm_count']   = 0
+        # Expose account number + statement number for duplicate detection in the app
+        _acct_m  = re.search(r'Account number\s+([\d\-]+)', text, re.IGNORECASE)
+        _stmt_m  = re.search(r'STATEMENT NUMBER\s+(\d+)',   text, re.IGNORECASE)
+        if _acct_m:
+            result['account_number']   = _acct_m.group(1).strip()
+        if _stmt_m:
+            result['statement_number'] = _stmt_m.group(1).strip()
+        return result
+    # ── End ANZ Home Loan fast-path ───────────────────────────────────────────
 
     transactions = []
 

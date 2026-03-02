@@ -156,6 +156,7 @@ PL_STRUCTURE = [
     ('section', 'FINANCING'),
     ('item',    'Mortgage Interest'),
     ('item',    'Bank Package Fee'),
+    ('item',    'Bank Service Fee'),
     ('total',   'Total Financing Cost'),
     ('blank',   None),
     ('kpi',     'NET PROFIT / (LOSS)'),
@@ -176,7 +177,7 @@ OPEX_ITEMS      = ['Management Fees', 'Letting Fees', 'Council Rates', 'Land Tax
                    'Strata / Body Corporate', 'Building Insurance',
                    'Maintenance & Repairs', 'Cleaning', 'Advertising', 'Miscellaneous']
 UTILITY_ITEMS   = ['Electricity', 'Water', 'Gas', 'Internet']
-FINANCING_ITEMS = ['Mortgage Interest', 'Bank Package Fee']
+FINANCING_ITEMS = ['Mortgage Interest', 'Bank Package Fee', 'Bank Service Fee']
 CF_ITEMS        = ['Cash Received (EFT)', 'Less: Utilities Paid',
                    'Less: Mortgage Repayment']
 
