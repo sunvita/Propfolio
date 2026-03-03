@@ -626,7 +626,7 @@ st.markdown("""
 # TODO: replace Plan toggle with Supabase auth result when authentication is wired up.
 
 for key, default in {
-    'show_landing':         True,   # True = show marketing landing page
+    'show_landing':         False,  # False = skip landing page, show app directly
     'user_email':           None,   # populated after Supabase auth
     'user_plan':            'pro',  # 'free' | 'pro'  — set via Plan toggle; later via Supabase auth
     'step':                 0,      # 0 = guide page (landing)
@@ -733,7 +733,7 @@ def _render_upgrade_banner() -> None:
             f'<span>'
             f'<span style="font-weight:700;margin-right:14px;">All features unlocked</span>'
             f'<span style="opacity:0.7;font-size:12px;">'
-            f'✅ Unlimited properties &nbsp;·&nbsp; '
+            f'✅ <b>Unlimited properties</b> &nbsp;·&nbsp; '
             f'✅ Full FY history &nbsp;·&nbsp; '
             f'✅ Add Entry &nbsp;·&nbsp; '
             f'✅ Portfolio Summary tab &nbsp;·&nbsp; '
