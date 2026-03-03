@@ -679,7 +679,18 @@ FREE_PROP_LIMIT   = 1    # max properties on free plan
 FREE_MONTH_LIMIT  = 6    # max months of data on free plan
 
 def _is_pro() -> bool:
-    """Main branch — all features unlocked (no gating)."""
+    """
+    Returns True if the current session has Pro access.
+
+    Behaviour is controlled by the APP_ENV environment variable
+    (set via Streamlit Cloud Secrets):
+
+      APP_ENV = "dev"  →  reads session_state['user_plan']  (Free/Pro toggle active)
+      APP_ENV absent   →  always True (Main / production — all features unlocked)
+    """
+    import os
+    if os.environ.get('APP_ENV') == 'dev':
+        return st.session_state.get('user_plan', 'free') == 'pro'
     return True
 
 def _plan_badge_html(plan: str | None = None) -> str:
