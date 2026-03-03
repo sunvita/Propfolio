@@ -621,10 +621,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Session state init ──────────────────────────────────────────────────────────
+# APP_ENV='dev'  → start with 'free' plan so gating is active by default
+# APP_ENV absent → Main/production; start with 'pro' (all features unlocked)
+import os as _os_init
+_default_user_plan = 'free' if _os_init.environ.get('APP_ENV') == 'dev' else 'pro'
+
 for key, default in {
     'show_landing':         True,   # True = show marketing landing page
     'user_email':           None,   # populated after Supabase auth
-    'user_plan':            'free', # 'free' | 'pro'
+    'user_plan':            _default_user_plan,  # 'free' gated in Dev; 'pro' unlocked in Main
     'step':                 0,      # 0 = guide page (landing)
     'properties':           [],
     'parsed_results':       [],
@@ -682,16 +687,13 @@ def _is_pro() -> bool:
     """
     Returns True if the current session has Pro access.
 
-    Behaviour is controlled by the APP_ENV environment variable
-    (set via Streamlit Cloud Secrets):
+    user_plan is initialised from APP_ENV at session start:
+      APP_ENV = "dev"  → user_plan defaults to 'free'  (gating active; Dev toggle can switch)
+      APP_ENV absent   → user_plan defaults to 'pro'   (Main / production — all unlocked)
 
-      APP_ENV = "dev"  →  reads session_state['user_plan']  (Free/Pro toggle active)
-      APP_ENV absent   →  always True (Main / production — all features unlocked)
+    This function simply reads user_plan — no environment check needed here.
     """
-    import os
-    if os.environ.get('APP_ENV') == 'dev':
-        return st.session_state.get('user_plan', 'free') == 'pro'
-    return True
+    return st.session_state.get('user_plan', 'pro') == 'pro'
 
 def _plan_badge_html(plan: str | None = None) -> str:
     """Return an inline HTML badge chip for the given plan (or current session plan)."""
@@ -701,12 +703,36 @@ def _plan_badge_html(plan: str | None = None) -> str:
     return '<span class="plan-badge plan-badge-free">FREE</span>'
 
 def _render_upgrade_banner() -> None:
-    """Amber upgrade strip shown at the top of every in-app page for Free users."""
+    """Plan strip shown at the top of every in-app page.
+    Free → amber banner with upgrade CTA.
+    Pro  → navy banner with PRO badge.
+    """
     if not _is_pro():
+        # ── Free: amber upgrade strip ──────────────────────────────────────────
         st.markdown(
-            f'<div class="upgrade-banner">'
+            f'<div style="background:linear-gradient(90deg,#FFA726 0%,#FF8F00 100%);'
+            f'color:#1a1a2e;padding:10px 20px;border-radius:7px;margin-bottom:14px;'
+            f'font-size:14px;font-weight:600;display:flex;align-items:center;'
+            f'justify-content:space-between;gap:12px;">'
             f'⚡ Free plan — 1 property · 6 months data · limited features'
-            f'<a href="{STRIPE_URL}" target="_blank">Upgrade to Pro — $49 once →</a>'
+            f'<a href="{STRIPE_URL}" target="_blank" style="display:inline-block;'
+            f'background:#FFFFFF;color:#E65100 !important;text-decoration:none;'
+            f'padding:5px 16px;border-radius:20px;font-size:12px;font-weight:700;'
+            f'white-space:nowrap;">Upgrade to Pro — $49 once →</a>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        # ── Pro: navy strip with PRO badge ─────────────────────────────────────
+        st.markdown(
+            f'<div style="background:#1A237E;'
+            f'color:#FFFFFF;padding:10px 20px;border-radius:7px;margin-bottom:14px;'
+            f'font-size:14px;font-weight:500;display:flex;align-items:center;'
+            f'justify-content:space-between;gap:12px;">'
+            f'Propfolio — All features unlocked'
+            f'<span style="background:linear-gradient(90deg,#FFA726 0%,#FF8F00 100%);'
+            f'color:#1a1a2e;padding:4px 14px;border-radius:20px;font-size:12px;'
+            f'font-weight:800;letter-spacing:0.5px;white-space:nowrap;">PRO</span>'
             f'</div>',
             unsafe_allow_html=True
         )
@@ -827,17 +853,19 @@ with st.sidebar:
                     del st.session_state[k]
             st.rerun()
 
-        # ── Dev: plan toggle (remove after Supabase auth is wired up) ─────────
-        with st.expander("🛠 Dev — Plan toggle", expanded=False):
-            _dev_plan = st.selectbox(
-                "Simulate plan", ['free', 'pro'],
-                index=0 if st.session_state.get('user_plan', 'free') == 'free' else 1,
-                key='_dev_plan_select',
-                label_visibility='collapsed',
-            )
-            if _dev_plan != st.session_state.get('user_plan', 'free'):
-                st.session_state['user_plan'] = _dev_plan
-                st.rerun()
+        # ── Dev: plan toggle — only shown when APP_ENV=dev (never in production) ──
+        import os as _os
+        if _os.environ.get('APP_ENV') == 'dev':
+            with st.expander("🛠 Dev — Plan toggle", expanded=False):
+                _dev_plan = st.selectbox(
+                    "Simulate plan", ['free', 'pro'],
+                    index=0 if st.session_state.get('user_plan', 'free') == 'free' else 1,
+                    key='_dev_plan_select',
+                    label_visibility='collapsed',
+                )
+                if _dev_plan != st.session_state.get('user_plan', 'free'):
+                    st.session_state['user_plan'] = _dev_plan
+                    st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LANDING PAGE (pre-app marketing view)
@@ -1183,15 +1211,20 @@ elif st.session_state.step == 1:
     col1, col2 = st.columns(2)
     with col1:
         # Gate 1: Free plan → 1 property max; Pro → unlimited via number input
+        # NOTE: max_value only controls +/- buttons, not typed input.
+        # Server-side enforcement via st.rerun() is required for typed values.
         n_props = st.number_input(
             "Number of properties",
             min_value=1,
             max_value=1 if not _is_pro() else None,
-            value=int(st.session_state.get('setup_n_props', 1)),
             step=1,
             key='setup_n_props',
             help="Each property gets its own tab.",
         )
+        # Server-side enforcement: if user typed > 1 while on Free plan, clamp and rerun.
+        if not _is_pro() and n_props > 1:
+            st.session_state['setup_n_props'] = 1
+            st.rerun()
         if not _is_pro():
             st.markdown(
                 f'<div style="font-size:12px;color:#E65100;margin-top:-8px;margin-bottom:4px;">'
