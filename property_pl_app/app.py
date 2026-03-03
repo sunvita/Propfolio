@@ -629,20 +629,23 @@ st.markdown("""
 # → Check both: os.environ first, then st.secrets as fallback.
 import os as _os_init
 def _get_app_env() -> str:
-    val = _os_init.environ.get('APP_ENV', '')
-    if not val:
+    """Read APP_ENV from os.environ first, then st.secrets as fallback.
+    Returns a clean lowercase-stripped string, or '' if not set."""
+    v = _os_init.environ.get('APP_ENV', '').strip()
+    if not v:
         try:
-            val = st.secrets.get('APP_ENV', '') or ''
+            v = str(st.secrets.get('APP_ENV') or '').strip()
         except Exception:
-            pass
-    return val
+            v = ''
+    return v
 
-_default_user_plan = 'free' if _get_app_env() == 'dev' else 'pro'
+_is_dev = (_get_app_env() == 'dev')
+_default_user_plan = 'free' if _is_dev else 'pro'
 
 for key, default in {
     'show_landing':         True,   # True = show marketing landing page
     'user_email':           None,   # populated after Supabase auth
-    'user_plan':            _default_user_plan,  # 'free' gated in Dev; 'pro' unlocked in Main
+    'user_plan':            _default_user_plan,  # 'free' in Dev; 'pro' in Main
     'step':                 0,      # 0 = guide page (landing)
     'properties':           [],
     'parsed_results':       [],
@@ -655,6 +658,12 @@ for key, default in {
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+# ── Enforce plan on every render (prevents stale session state) ────────────────
+# On Main (APP_ENV != 'dev'): user_plan is always 'pro' — no UI exists to change it.
+# On Dev: user_plan is initialised to 'free' above; Dev toggle can switch it freely.
+if not _is_dev:
+    st.session_state['user_plan'] = 'pro'
 
 MONTH_NAMES = {1:'January',2:'February',3:'March',4:'April',5:'May',6:'June',
                7:'July',8:'August',9:'September',10:'October',11:'November',12:'December'}
@@ -875,7 +884,7 @@ with st.sidebar:
             st.rerun()
 
         # ── Dev: plan toggle — only shown when APP_ENV=dev (never in production) ──
-        if _get_app_env() == 'dev':
+        if _is_dev:
             with st.expander("🛠 Dev — Plan toggle", expanded=False):
                 _dev_plan = st.selectbox(
                     "Simulate plan", ['free', 'pro'],
@@ -902,7 +911,7 @@ if st.session_state.get('show_landing', True):
             'href="#signup"',
             'href="javascript:void(0)" onclick="window.parent.postMessage(\'propfolio_try_free\',\'*\')"'
         )
-        _stc.html(_landing_html, height=5200, scrolling=True)
+        _stc.html(_landing_html, height=3600, scrolling=True)
     else:
         # Fallback if landing.html is missing
         st.markdown(
@@ -914,17 +923,34 @@ if st.session_state.get('show_landing', True):
             '</div>', unsafe_allow_html=True
         )
 
-    # CTA button in Streamlit (always visible below the iframe / fallback)
-    st.markdown('<div style="margin:0 auto;max-width:320px;">', unsafe_allow_html=True)
-    if st.button("🚀 Try Free — Get Started →", use_container_width=True,
-                 type="primary", key="landing_cta"):
+    # ── Hidden trigger button — clicked via postMessage from landing iframe ──────
+    # The landing.html CTAs fire: window.parent.postMessage('propfolio_try_free','*')
+    # A 0-height JS component listens and clicks this hidden button programmatically.
+    st.markdown('<div style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;">', unsafe_allow_html=True)
+    if st.button('PROPFOLIO_ENTER', key='landing_enter_trigger'):
         st.session_state['show_landing'] = False
         st.rerun()
-    st.markdown(
-        '<p style="text-align:center;font-size:13px;color:#9E9E9E;margin-top:8px;">'
-        'No sign-up required &nbsp;·&nbsp; 1 property free</p>'
-        '</div>', unsafe_allow_html=True
-    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # JS listener: catches postMessage from the landing iframe and clicks the hidden button
+    _stc.html("""
+<script>
+(function () {
+    function clickEnter() {
+        var btns = window.parent.document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+            if (btns[i].innerText.trim() === 'PROPFOLIO_ENTER') {
+                btns[i].click();
+                return;
+            }
+        }
+    }
+    window.addEventListener('message', function (e) {
+        if (e.data === 'propfolio_try_free') { clickEnter(); }
+    });
+})();
+</script>
+""", height=0)
     st.stop()
 
 # ── Upgrade banner — shown at top of every in-app page for Free users ─────────
