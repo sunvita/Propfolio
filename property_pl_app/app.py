@@ -882,13 +882,17 @@ if st.session_state.get('show_landing', True):
     if os.path.exists(_landing_path):
         with open(_landing_path, 'r', encoding='utf-8') as _f:
             _landing_html = _f.read()
-        # Replace CTA hrefs — clicking navigates window.parent to ?enter=1.
-        # Streamlit re-runs, sees the query param at the top of app.py,
-        # sets show_landing=False, and clears the param.  No hidden buttons needed.
-        _landing_html = _landing_html.replace(
-            'href="#signup"',
-            'href="javascript:void(0)" onclick="window.parent.location.search=\'?enter=1\'"'
+        # Replace CTA hrefs — clicking navigates to ?enter=1.
+        # Uses window.top (allowed by Streamlit's allow-top-navigation-by-user-activation
+        # sandbox flag) so it works even when window.parent.location is cross-origin blocked.
+        # Streamlit detects the query param on re-run, sets show_landing=False, clears param.
+        _enter_js = (
+            "javascript:void(0)"
+            "\" onclick=\""
+            "window.top.location.href="
+            "window.top.location.pathname+'?enter=1'"
         )
+        _landing_html = _landing_html.replace('href="#signup"', f'href="{_enter_js}"')
         # Inject a script that repositions the Streamlit component iframe to cover the
         # full viewport (position:fixed; 100vw × 100vh; max z-index).
         # This eliminates the "screen within screen" effect caused by _stc.html().
