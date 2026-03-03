@@ -703,8 +703,12 @@ def _plan_badge_html(plan: str | None = None) -> str:
     return '<span class="plan-badge plan-badge-free">FREE</span>'
 
 def _render_upgrade_banner() -> None:
-    """Amber upgrade strip shown at the top of every in-app page for Free users."""
+    """Plan strip shown at the top of every in-app page.
+    Free → amber banner with upgrade CTA.
+    Pro  → navy banner with PRO badge.
+    """
     if not _is_pro():
+        # ── Free: amber upgrade strip ──────────────────────────────────────────
         st.markdown(
             f'<div style="background:linear-gradient(90deg,#FFA726 0%,#FF8F00 100%);'
             f'color:#1a1a2e;padding:10px 20px;border-radius:7px;margin-bottom:14px;'
@@ -712,9 +716,23 @@ def _render_upgrade_banner() -> None:
             f'justify-content:space-between;gap:12px;">'
             f'⚡ Free plan — 1 property · 6 months data · limited features'
             f'<a href="{STRIPE_URL}" target="_blank" style="display:inline-block;'
-            f'background:#1a1a2e;color:#FFA726 !important;text-decoration:none;'
+            f'background:#FFFFFF;color:#E65100 !important;text-decoration:none;'
             f'padding:5px 16px;border-radius:20px;font-size:12px;font-weight:700;'
             f'white-space:nowrap;">Upgrade to Pro — $49 once →</a>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        # ── Pro: navy strip with PRO badge ─────────────────────────────────────
+        st.markdown(
+            f'<div style="background:#1A237E;'
+            f'color:#FFFFFF;padding:10px 20px;border-radius:7px;margin-bottom:14px;'
+            f'font-size:14px;font-weight:500;display:flex;align-items:center;'
+            f'justify-content:space-between;gap:12px;">'
+            f'Propfolio — All features unlocked'
+            f'<span style="background:linear-gradient(90deg,#FFA726 0%,#FF8F00 100%);'
+            f'color:#1a1a2e;padding:4px 14px;border-radius:20px;font-size:12px;'
+            f'font-weight:800;letter-spacing:0.5px;white-space:nowrap;">PRO</span>'
             f'</div>',
             unsafe_allow_html=True
         )
