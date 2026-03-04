@@ -807,72 +807,60 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.session_state.get('show_landing', True):
-        # On landing page — show a single prompt to enter the app
-        st.markdown(
-            '<div style="color:#9E9E9E;font-size:13px;text-align:center;padding:8px 0;">'
-            'Free to try · No sign-up required</div>',
-            unsafe_allow_html=True
-        )
-        if st.button("🚀 Try Free", use_container_width=True, type="primary",
-                     key="sidebar_try_free"):
-            st.session_state['show_landing'] = False
-            st.rerun()
+    # ← Home — shows landing page (only visible when inside the app, not on landing)
+    if st.button("← Home", use_container_width=True, key="sidebar_home"):
+        st.session_state['show_landing'] = True
+        st.rerun()
+
+    st.markdown("---")
+
+    # ⓪ Getting Started (guide page) — always clickable except when already there
+    if st.session_state.step == 0:
+        st.markdown("**▶ ⓪ Getting Started**")
     else:
-        # ← Back to Home
-        if st.button("← Home", use_container_width=True, key="sidebar_home"):
-            st.session_state['show_landing'] = True
+        if st.button("⓪ Getting Started", use_container_width=True,
+                     key="sidebar_guide"):
+            st.session_state.step = 0
             st.rerun()
 
-        st.markdown("---")
-
-        # ⓪ Getting Started (guide page) — always clickable except when already there
-        if st.session_state.step == 0:
-            st.markdown("**▶ ⓪ Getting Started**")
+    # Steps 1–4
+    steps = ["① Setup", "② Upload PDFs", "③ Review & Edit", "④ Generate Excel"]
+    for i, s in enumerate(steps, 1):
+        if st.session_state.step == i:
+            st.markdown(f"**▶ {s}**")
+        elif i == 1 and st.session_state.step != 1:
+            saved = st.session_state.get('prop_configs')
+            icon  = '✅' if st.session_state.step > 1 else '○'
+            label = f"{icon} {s}" + (' 💾' if saved else '')
+            if st.button(label, use_container_width=True, key="sidebar_setup"):
+                st.session_state.step = 1
+                st.rerun()
+        elif st.session_state.step > i:
+            st.markdown(f"✅ {s}")
         else:
-            if st.button("⓪ Getting Started", use_container_width=True,
-                         key="sidebar_guide"):
-                st.session_state.step = 0
-                st.rerun()
+            st.markdown(f"○ {s}")
 
-        # Steps 1–4
-        steps = ["① Setup", "② Upload PDFs", "③ Review & Edit", "④ Generate Excel"]
-        for i, s in enumerate(steps, 1):
-            if st.session_state.step == i:
-                st.markdown(f"**▶ {s}**")
-            elif i == 1 and st.session_state.step != 1:
-                saved = st.session_state.get('prop_configs')
-                icon  = '✅' if st.session_state.step > 1 else '○'
-                label = f"{icon} {s}" + (' 💾' if saved else '')
-                if st.button(label, use_container_width=True, key="sidebar_setup"):
-                    st.session_state.step = 1
-                    st.rerun()
-            elif st.session_state.step > i:
-                st.markdown(f"✅ {s}")
-            else:
-                st.markdown(f"○ {s}")
+    st.markdown("---")
+    st.caption(f"Parser v{_PARSER_VERSION}")
+    if st.button("🔄 Start Over", use_container_width=True):
+        for k in ['step', 'properties', 'parsed_results',
+                  'session_loaded', 'merge_change_log',
+                  'parse_done', 'uploaded_files_meta', '_setup_cfg']:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.rerun()
 
-        st.markdown("---")
-        st.caption(f"Parser v{_PARSER_VERSION}")
-        if st.button("🔄 Start Over", use_container_width=True):
-            for k in ['step', 'properties', 'parsed_results',
-                      'session_loaded', 'merge_change_log',
-                      'parse_done', 'uploaded_files_meta', '_setup_cfg']:
-                if k in st.session_state:
-                    del st.session_state[k]
+    # ── Plan toggle (always shown — replace with Supabase auth result later) ──
+    with st.expander("🛠 Plan toggle", expanded=False):
+        _dev_plan = st.selectbox(
+            "Simulate plan", ['pro', 'free'],
+            index=0 if st.session_state.get('user_plan', 'pro') == 'pro' else 1,
+            key='_dev_plan_select',
+            label_visibility='collapsed',
+        )
+        if _dev_plan != st.session_state.get('user_plan', 'pro'):
+            st.session_state['user_plan'] = _dev_plan
             st.rerun()
-
-        # ── Plan toggle (always shown — replace with Supabase auth result later) ──
-        with st.expander("🛠 Plan toggle", expanded=False):
-            _dev_plan = st.selectbox(
-                "Simulate plan", ['pro', 'free'],
-                index=0 if st.session_state.get('user_plan', 'pro') == 'pro' else 1,
-                key='_dev_plan_select',
-                label_visibility='collapsed',
-            )
-            if _dev_plan != st.session_state.get('user_plan', 'pro'):
-                st.session_state['user_plan'] = _dev_plan
-                st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LANDING PAGE (pre-app marketing view)
@@ -882,18 +870,22 @@ if st.session_state.get('show_landing', True):
     if os.path.exists(_landing_path):
         with open(_landing_path, 'r', encoding='utf-8') as _f:
             _landing_html = _f.read()
-        # Replace CTA hrefs — clicking sends a Streamlit componentValue message.
-        # window.parent.postMessage is always allowed from sandboxed iframes (no special
-        # sandbox flags needed). Streamlit receives the value, re-runs, and Python detects
-        # the "enter" signal below to set show_landing=False.
-        # NOTE: window.top.location.href was removed — it silently fails when the component
-        # iframe is served as a data:/blob: URL (cross-origin), which blocks .pathname reads.
+        # Replace CTA hrefs — clicking navigates the top frame to ?enter=1.
+        #
+        # Why this works:
+        #   document.referrer  — always contains the Streamlit app URL inside an iframe,
+        #                        readable without any cross-origin restriction.
+        #   window.open(_top)  — user-gesture-initiated top-frame navigation; allowed by
+        #                        Streamlit's sandbox flag allow-top-navigation-by-user-activation.
+        #   Full page reload   — clears any cached component values; no replay bug.
+        #
+        # Why previous approaches failed:
+        #   window.top.location.pathname — cross-origin read blocked (silent SecurityError)
+        #   postMessage componentValue   — value cached by Streamlit; replays on re-render
         _cta_onclick = (
-            "window.parent.postMessage("
-            "{isStreamlitMessage:true,"
-            "type:'streamlit:componentValue',"
-            "value:'enter',"
-            "dataType:'json'},'*')"
+            "window.open("
+            "(document.referrer.split('?')[0]||'/')+'?enter=1',"
+            "'_top')"
         )
         _landing_html = _landing_html.replace(
             'href="#signup"',
@@ -917,11 +909,7 @@ if st.session_state.get('show_landing', True):
             '})()</script>'
         )
         _landing_html = _landing_html.replace('<head>', '<head>' + _fs_script, 1)
-        _landing_result = _stc.html(_landing_html, height=600, scrolling=True)
-        # CTA button sends componentValue "enter" → Streamlit re-runs → catch it here.
-        if _landing_result == 'enter':
-            st.session_state['show_landing'] = False
-            st.rerun()
+        _stc.html(_landing_html, height=600, scrolling=True)
     else:
         # Fallback if landing.html is missing
         st.markdown(
