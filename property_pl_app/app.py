@@ -1997,9 +1997,10 @@ elif st.session_state.step == 3:
             )
             _ae_interval = _gr3.selectbox(
                 "Every",
-                [1, 3, 6],
+                [1, 3, 6, 12],
                 format_func=lambda x: {1: "1 month", 3: "3 months (quarterly)",
-                                        6: "6 months (semi-annual)"}[x],
+                                        6: "6 months (semi-annual)",
+                                        12: "12 months (annual)"}[x],
                 key="ae_interval"
             )
 
@@ -2008,7 +2009,7 @@ elif st.session_state.step == 3:
             if _ae_recurring:
                 _per_entry = _ae_amt if _ae_mode == 'A' else round(_ae_amt / _ae_n, 2)
                 _total_val = round(_ae_amt * _ae_n, 2) if _ae_mode == 'A' else _ae_amt
-                _interval_label = {1: "monthly", 3: "quarterly", 6: "semi-annual"}[_ae_interval]
+                _interval_label = {1: "monthly", 3: "quarterly", 6: "semi-annual", 12: "annual"}[_ae_interval]
                 st.caption(
                     f"📌 {_ae_n} entries × ${_per_entry:,.2f} ({_interval_label})"
                     f" = **${_total_val:,.2f} total** → {_sel_prop_name}"
