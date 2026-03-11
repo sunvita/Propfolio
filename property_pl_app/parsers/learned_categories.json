@@ -8,5 +8,10 @@
     "keyword": "bank debit fee",
     "section": "opex",
     "category": "Financing"
+  },
+  {
+    "keyword": "closing balance",
+    "section": "opex",
+    "category": "Financing"
   }
 ]
