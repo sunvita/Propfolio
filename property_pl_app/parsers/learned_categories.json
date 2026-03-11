@@ -10,8 +10,13 @@
     "category": "Financing"
   },
   {
-    "keyword": "total credits",
-    "section": "income",
-    "category": "Rental Income"
+    "keyword": "closing balance",
+    "section": "opex",
+    "category": "Financing"
+  },
+  {
+    "keyword": "offset to loan account",
+    "section": "opex",
+    "category": "Financing"
   }
 ]
